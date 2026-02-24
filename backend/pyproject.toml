@@ -1,6 +1,24 @@
+[project]
+name = "myuux-backend"
+version = "0.1.0"
+description = "Artifact-first Workspace backend API"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi==0.115.5",
+  "python-multipart==0.0.17",
+  "sqlmodel==0.0.22",
+  "uvicorn[standard]==0.32.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.3.3",
+  "ruff==0.7.4",
+]
+
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
