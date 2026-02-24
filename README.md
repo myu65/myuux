@@ -33,7 +33,7 @@ docker compose up
 
 ```bash
 cd backend
-pip install -e ".[dev]"
+pip install -r requirements.txt
 ruff check
 pytest
 ```
