@@ -28,3 +28,15 @@ docker compose up
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/events`
 - `POST /api/workspaces/{id}/chat`
+
+## Backend quality setup (TDD + Ruff)
+
+```bash
+cd backend
+pip install -r requirements.txt
+ruff check
+pytest
+```
+
+- Add tests first (Red), implement minimum code (Green), then refactor (Refactor).
+- Keep this flow for API changes and bug fixes.

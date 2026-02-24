@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Generator, Optional
 
@@ -5,6 +6,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from pydantic import Field as PydanticField
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 app = FastAPI(title="Artifact-first Workspace API", version="0.1.0")
@@ -16,7 +18,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = create_engine("sqlite:///./workspace.db", echo=False)
+
+
+def build_engine(database_url: str):
+    return create_engine(database_url, echo=False)
+
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./workspace.db")
+engine = build_engine(DATABASE_URL)
 
 
 class Workspace(SQLModel, table=True):
@@ -69,8 +78,8 @@ class WorkspaceCreate(BaseModel):
 class RunCreate(BaseModel):
     skill: str
     prompt: str
-    input_artifact_ids: list[int] = []
-    params: dict = {}
+    input_artifact_ids: list[int] = PydanticField(default_factory=list)
+    params: dict = PydanticField(default_factory=dict)
 
 
 class ChatCreate(BaseModel):
@@ -83,9 +92,13 @@ def get_session() -> Generator[Session, None, None]:
         yield session
 
 
+def init_db() -> None:
+    SQLModel.metadata.create_all(engine)
+
+
 @app.on_event("startup")
 def startup() -> None:
-    SQLModel.metadata.create_all(engine)
+    init_db()
 
 
 @app.post("/api/workspaces", response_model=Workspace)
