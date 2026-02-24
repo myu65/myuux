@@ -39,11 +39,20 @@ class QueryField:
     def __eq__(self, other: Any) -> Condition:  # type: ignore[override]
         return Condition(self.name, other, operator="eq")
 
+    def __ne__(self, other: Any) -> Condition:  # type: ignore[override]
+        return Condition(self.name, other, operator="ne")
+
     def __lt__(self, other: Any) -> Condition:
         return Condition(self.name, other, operator="lt")
 
     def __gt__(self, other: Any) -> Condition:
         return Condition(self.name, other, operator="gt")
+
+    def __le__(self, other: Any) -> Condition:
+        return Condition(self.name, other, operator="le")
+
+    def __ge__(self, other: Any) -> Condition:
+        return Condition(self.name, other, operator="ge")
 
     def asc(self) -> Order:
         return Order(self.name, descending=False)
@@ -157,10 +166,16 @@ class Session:
         for condition in query.conditions:
             if condition.operator == "eq":
                 rows = [row for row in rows if getattr(row, condition.field_name) == condition.value]
+            elif condition.operator == "ne":
+                rows = [row for row in rows if getattr(row, condition.field_name) != condition.value]
             elif condition.operator == "lt":
                 rows = [row for row in rows if getattr(row, condition.field_name) < condition.value]
             elif condition.operator == "gt":
                 rows = [row for row in rows if getattr(row, condition.field_name) > condition.value]
+            elif condition.operator == "le":
+                rows = [row for row in rows if getattr(row, condition.field_name) <= condition.value]
+            elif condition.operator == "ge":
+                rows = [row for row in rows if getattr(row, condition.field_name) >= condition.value]
         if query.order is not None:
             rows.sort(key=lambda row: getattr(row, query.order.field_name), reverse=query.order.descending)
         return Result(rows)
