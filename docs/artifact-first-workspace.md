@@ -23,3 +23,12 @@ IDEではなく成果物中心のワークスペースを提供し、AIチャッ
 - Run worker を Redis Queue + worker process に分離
 - Preview adapter を skill ごとに追加
 - publish/version compare の高度化
+
+## 追加したAPI契約（Run Traceability）
+- `POST /api/runs/{run_id}/complete`
+  - 目的: Run完了時に `out/` への成果物登録を行い、runとartifactの因果を残す。
+  - 入力: `output_filename`, `artifact_type`
+  - 出力: `run_id`, `status`, `output_artifact`
+- `POST /api/artifacts/{artifact_id}/publish`
+  - 目的: publishを明示的な操作として記録する。
+  - 出力: `published_at` が設定された Artifact

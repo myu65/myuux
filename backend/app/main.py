@@ -19,7 +19,6 @@ app.add_middleware(
 )
 
 
-
 def build_engine(database_url: str):
     return create_engine(database_url, echo=False)
 
@@ -45,6 +44,7 @@ class Artifact(SQLModel, table=True):
     version_no: int
     source_run_id: Optional[int] = None
     metadata_json: str = "{}"
+    published_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -80,6 +80,17 @@ class RunCreate(BaseModel):
     prompt: str
     input_artifact_ids: list[int] = PydanticField(default_factory=list)
     params: dict = PydanticField(default_factory=dict)
+
+
+class RunComplete(BaseModel):
+    output_filename: str
+    artifact_type: str
+
+
+class RunCompleteResponse(BaseModel):
+    run_id: int
+    status: str
+    output_artifact: Artifact
 
 
 class ChatCreate(BaseModel):
@@ -129,8 +140,8 @@ def get_workspace(workspace_id: int, session: Session = Depends(get_session)) ->
     return workspace
 
 
-@app.post("/api/workspaces/{workspace_id}/upload")
-def upload_file(workspace_id: int, file: UploadFile = File(...), session: Session = Depends(get_session)):
+@app.post("/api/workspaces/{workspace_id}/upload", response_model=Artifact)
+def upload_file(workspace_id: int, file: UploadFile = File(...), session: Session = Depends(get_session)) -> Artifact:
     workspace = session.get(Workspace, workspace_id)
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
@@ -166,6 +177,48 @@ def create_run(workspace_id: int, payload: RunCreate, session: Session = Depends
     session.commit()
     session.refresh(run)
     return run
+
+
+@app.post("/api/runs/{run_id}/complete", response_model=RunCompleteResponse)
+def complete_run(run_id: int, payload: RunComplete, session: Session = Depends(get_session)) -> RunCompleteResponse:
+    run = session.get(Run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    artifact = Artifact(
+        workspace_id=run.workspace_id,
+        path=f"out/{payload.output_filename}",
+        type=payload.artifact_type,
+        version_group=payload.output_filename,
+        version_no=1,
+        source_run_id=run.id,
+    )
+    session.add(artifact)
+
+    run.status = "success"
+    run.finished_at = datetime.utcnow()
+    run.output_artifact_ids = str([artifact.id] if artifact.id else [])
+    session.add(run)
+    session.commit()
+    session.refresh(artifact)
+    run.output_artifact_ids = str([artifact.id])
+    session.add(run)
+    session.commit()
+
+    return RunCompleteResponse(run_id=run.id, status=run.status, output_artifact=artifact)
+
+
+@app.post("/api/artifacts/{artifact_id}/publish", response_model=Artifact)
+def publish_artifact(artifact_id: int, session: Session = Depends(get_session)) -> Artifact:
+    artifact = session.get(Artifact, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    artifact.published_at = datetime.utcnow()
+    session.add(artifact)
+    session.commit()
+    session.refresh(artifact)
+    return artifact
 
 
 @app.get("/api/workspaces/{workspace_id}/runs", response_model=list[Run])
@@ -215,11 +268,13 @@ def run_events(run_id: int):
 def get_feature_catalog() -> FeatureCatalog:
     """Return extension points that make feature additions predictable and traceable."""
     return FeatureCatalog(
-        version="1.0",
+        version="1.1",
         extension_points=[
             "workspace_lifecycle",
             "artifact_upload",
             "run_creation",
+            "run_completion",
+            "artifact_publish",
             "run_events_stream",
             "chat_trigger",
         ],
@@ -227,5 +282,7 @@ def get_feature_catalog() -> FeatureCatalog:
             "Use /api/workspaces/{id}/runs for reproducible execution records.",
             "Use /api/runs/{run_id}/events for live log streaming.",
             "Store generated files under out/ and keep raw uploads immutable.",
+            "Use /api/runs/{run_id}/complete to register generated artifacts.",
+            "Use /api/artifacts/{artifact_id}/publish for explicit publication.",
         ],
     )
