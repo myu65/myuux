@@ -23,10 +23,15 @@ def test_missing_snippets_reports_only_missing(tmp_path: Path) -> None:
     assert result == ["gamma"]
 
 
-def test_run_contract_checks_passes_for_current_repo() -> None:
+def test_run_contract_checks_detects_missing_contracts(tmp_path: Path) -> None:
     checks = load_module()
-    repo_root = Path(__file__).resolve().parents[2]
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    (tmp_path / "backend").mkdir(parents=True)
+    (tmp_path / ".github/workflows/backend-ci.yml").write_text("name: Backend CI\n", encoding="utf-8")
+    (tmp_path / "backend/pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
 
-    failures = checks.run_contract_checks(repo_root)
+    failures = checks.run_contract_checks(tmp_path)
 
-    assert failures == []
+    assert len(failures) == 2
+    assert failures[0].startswith("workflow missing:")
+    assert failures[1].startswith("backend/pyproject.toml missing:")

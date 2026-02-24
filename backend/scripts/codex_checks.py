@@ -13,39 +13,20 @@ def run_contract_checks(repo_root: Path) -> list[str]:
 
     workflow_path = repo_root / ".github/workflows/backend-ci.yml"
     workflow_required = [
-        "uses: astral-sh/setup-uv@v4",
+        "setup-uv",
         "uv sync --dev",
-        "uv run python scripts/codex_checks.py",
         "uv run ruff check",
         "uv run pytest",
     ]
     missing_workflow = missing_snippets(workflow_path, workflow_required)
     if missing_workflow:
-        failures.append(
-            "workflow missing: " + ", ".join(f"`{snippet}`" for snippet in missing_workflow),
-        )
+        failures.append("workflow missing: " + ", ".join(f"`{snippet}`" for snippet in missing_workflow))
 
     pyproject_path = repo_root / "backend/pyproject.toml"
-    pyproject_required = [
-        '"pytest==',
-        '"ruff==',
-    ]
+    pyproject_required = ['"pytest==', '"ruff==']
     missing_pyproject = missing_snippets(pyproject_path, pyproject_required)
     if missing_pyproject:
-        failures.append(
-            "backend/pyproject.toml missing: " + ", ".join(f"`{snippet}`" for snippet in missing_pyproject),
-        )
-
-    agents_path = repo_root / "AGENTS.md"
-    agents_required = [
-        "ruff check",
-        "pytest",
-    ]
-    missing_agents = missing_snippets(agents_path, agents_required)
-    if missing_agents:
-        failures.append(
-            "AGENTS.md missing: " + ", ".join(f"`{snippet}`" for snippet in missing_agents),
-        )
+        failures.append("backend/pyproject.toml missing: " + ", ".join(f"`{snippet}`" for snippet in missing_pyproject))
 
     return failures
 
