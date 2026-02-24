@@ -1,43 +1,51 @@
 # TODO: Concept Realization Plan (Artifact-first Workspace)
 
-## 0. Foundation / Definition of Done
-- [x] Define a concrete execution roadmap aligned with project concept.
-- [ ] Add architecture decision records for immutable raw / explicit publish flow.
-- [ ] Add reproducibility policy (run input hash, output provenance fields).
+最終更新: agent実装の土台まで分解（2026-02）
 
-## 1. Preview-first UX (MVP Priority #1)
-- [ ] Connect frontend preview pane to real artifact list API.
-- [ ] Add artifact type-aware preview router (pptx/pdf/xlsx/image/text fallback).
-- [ ] Add empty/loading/error UI states for preview.
+## A. 直近の到達点（2週間）
+- [ ] ワークスペース契約を API で強制（`raw/` read-only, `out/` write-only, publish explicit）。
+- [ ] Run を state machine で運用（`queued/planning/running/waiting_user/success/failed`）。
+- [ ] Skill 実行契約（typed input/output）を導入。
+- [ ] Run provenance（prompt hash / skill version / input-output IDs）を保存。
 
-## 2. Run Logs via SSE (MVP Priority #2)
-- [ ] Wire frontend run console to `/api/runs/{id}/events`.
-- [ ] Add reconnect + last-event-id behavior.
-- [ ] Add backend event typing schema for structured logs.
+## B. 実装分解 TODO（優先順）
 
-## 3. Chat-triggered Runs (MVP Priority #3)
-- [ ] Connect chat UI to `/api/workspaces/{id}/chat`.
-- [ ] Show message-to-run linkage in UI timeline.
-- [ ] Add validation for supported skill names.
+### B1. Workspace contract（基盤）
+- [x] path policy helper を追加（`raw` 読み取り判定 / `out` 出力判定）。
+- [ ] upload / complete API で path policy 検証を強制。
+- [ ] publish 前提条件（`out` 配下のみ publish 可能）を明文化して実装。
+- [ ] TestClient で不正 path の 4xx を検証。
 
-## 4. Versioning / Traceability (MVP Priority #4)
-- [x] Add run completion endpoint to register generated artifacts in `out/`.
-- [x] Add explicit artifact publish endpoint.
-- [x] Add per-version chain API (previous/next by version group).
-- [ ] Persist structured `input_artifact_ids` / `output_artifact_ids` as JSON fields.
+### B2. Agent runtime contract（agent土台）
+- [x] Run phase enum と遷移ルール helper を追加。
+- [x] SkillSpec とデフォルト skill catalog を追加。
+- [ ] run create 時に未対応 skill を 422 で拒否。
+- [ ] skill version を run レコードへ保存。
 
-## 5. Real format preview adapters (MVP Priority #5)
-- [ ] Add backend signed URL or file serving strategy for previews.
-- [ ] Integrate first real PDF viewer.
-- [ ] Integrate PPTX rendering strategy.
-- [ ] Integrate XLSX grid preview strategy.
+### B3. Run logs / observability
+- [ ] SSE event を typed 化（`state_changed`, `tool_called`, `artifact_registered`）。
+- [ ] last-event-id / reconnect を実装。
+- [ ] frontend console を event type 別に描画。
 
-## 6. Quality / CI
-- [x] Follow TDD for introduced backend APIs (Red -> Green).
-- [ ] Extend tests for HTTP-level endpoint behavior with TestClient.
-- [ ] Add frontend smoke tests.
-- [ ] Add CI steps for `ruff check` and `pytest` if missing.
+### B4. Reproducibility / replay
+- [ ] `input_artifact_ids` / `output_artifact_ids` を JSON 構造として保存。
+- [ ] provenance fields（`prompt_hash`, `model_id`, `runtime_config_json`）を追加。
+- [ ] `POST /api/runs/{id}/replay` を追加。
+- [ ] `GET /api/runs/{id}/provenance` を追加。
 
-## 7. Documentation
-- [x] Document newly added endpoints in README.
-- [ ] Expand docs with API contracts and examples.
+### B5. Preview-first UX
+- [x] Artifact list API を preview pane に接続。
+- [ ] type-aware preview router（pptx/pdf/xlsx/image/text fallback）。
+- [ ] preview の loading/error/empty を分離。
+- [ ] version chain compare UI。
+
+## C. NotebookLM-like 体験（ソース根拠）
+- [ ] Sources パネル（raw/out/run/message reference）を追加。
+- [ ] chat 返答に artifact/run citation を付与。
+- [ ] 選択 artifact 群に対する横断分析フローを追加。
+
+## D. 品質ゲート
+- [x] TDD を原則化（Red -> Green -> Refactor）。
+- [ ] HTTP レベルテスト（TestClient）を拡張。
+- [ ] frontend smoke test を追加。
+- [x] CI に `ruff check` / `pytest` を設定。

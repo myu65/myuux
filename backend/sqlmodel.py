@@ -20,9 +20,10 @@ class _Metadata:
 
 
 class Condition:
-    def __init__(self, field_name: str, value: Any):
+    def __init__(self, field_name: str, value: Any, operator: str = "eq"):
         self.field_name = field_name
         self.value = value
+        self.operator = operator
 
 
 class Order:
@@ -36,7 +37,16 @@ class QueryField:
         self.name = name
 
     def __eq__(self, other: Any) -> Condition:  # type: ignore[override]
-        return Condition(self.name, other)
+        return Condition(self.name, other, operator="eq")
+
+    def __lt__(self, other: Any) -> Condition:
+        return Condition(self.name, other, operator="lt")
+
+    def __gt__(self, other: Any) -> Condition:
+        return Condition(self.name, other, operator="gt")
+
+    def asc(self) -> Order:
+        return Order(self.name, descending=False)
 
     def desc(self) -> Order:
         return Order(self.name, descending=True)
@@ -85,8 +95,8 @@ class SelectQuery:
         self.conditions: list[Condition] = []
         self.order: Order | None = None
 
-    def where(self, condition: Condition) -> SelectQuery:
-        self.conditions.append(condition)
+    def where(self, *conditions: Condition) -> SelectQuery:
+        self.conditions.extend(conditions)
         return self
 
     def order_by(self, order: Order) -> SelectQuery:
@@ -100,6 +110,11 @@ class Result:
 
     def all(self) -> list[SQLModel]:
         return self._rows
+
+    def first(self) -> SQLModel | None:
+        if not self._rows:
+            return None
+        return self._rows[0]
 
 
 class Session:
@@ -140,7 +155,12 @@ class Session:
     def exec(self, query: SelectQuery) -> Result:
         rows = list(self.engine.storage.get(query.model, []))
         for condition in query.conditions:
-            rows = [row for row in rows if getattr(row, condition.field_name) == condition.value]
+            if condition.operator == "eq":
+                rows = [row for row in rows if getattr(row, condition.field_name) == condition.value]
+            elif condition.operator == "lt":
+                rows = [row for row in rows if getattr(row, condition.field_name) < condition.value]
+            elif condition.operator == "gt":
+                rows = [row for row in rows if getattr(row, condition.field_name) > condition.value]
         if query.order is not None:
             rows.sort(key=lambda row: getattr(row, query.order.field_name), reverse=query.order.descending)
         return Result(rows)
