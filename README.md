@@ -34,6 +34,7 @@ docker compose up
 ```bash
 cd backend
 uv sync --dev
+uv run python scripts/codex_checks.py
 uv run ruff check
 uv run pytest
 ```
