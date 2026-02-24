@@ -33,9 +33,9 @@ docker compose up
 
 ```bash
 cd backend
-pip install -r requirements.txt
-ruff check
-pytest
+uv sync --dev
+uv run ruff check
+uv run pytest
 ```
 
 - Add tests first (Red), implement minimum code (Green), then refactor (Refactor).
