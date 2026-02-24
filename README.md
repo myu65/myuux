@@ -30,6 +30,7 @@ docker compose up
 - `GET /api/runs/{run_id}/events`
 - `POST /api/runs/{run_id}/complete`
 - `POST /api/artifacts/{artifact_id}/publish`
+- `GET /api/artifacts/{artifact_id}/chain`
 - `POST /api/workspaces/{id}/chat`
 
 ## Backend quality setup (TDD + Ruff)

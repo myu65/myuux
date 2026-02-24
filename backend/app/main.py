@@ -93,6 +93,12 @@ class RunCompleteResponse(BaseModel):
     output_artifact: Artifact
 
 
+class ArtifactVersionChain(BaseModel):
+    artifact: Artifact
+    previous_artifact: Artifact | None = None
+    next_artifact: Artifact | None = None
+
+
 class ChatCreate(BaseModel):
     prompt: str
     skill: str = "ppt_revise"
@@ -185,12 +191,22 @@ def complete_run(run_id: int, payload: RunComplete, session: Session = Depends(g
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
 
+    latest_in_group = session.exec(
+        select(Artifact)
+        .where(
+            Artifact.workspace_id == run.workspace_id,
+            Artifact.version_group == payload.output_filename,
+        )
+        .order_by(Artifact.version_no.desc())
+    ).first()
+    next_version = (latest_in_group.version_no + 1) if latest_in_group else 1
+
     artifact = Artifact(
         workspace_id=run.workspace_id,
         path=f"out/{payload.output_filename}",
         type=payload.artifact_type,
         version_group=payload.output_filename,
-        version_no=1,
+        version_no=next_version,
         source_run_id=run.id,
     )
     session.add(artifact)
@@ -220,6 +236,40 @@ def publish_artifact(artifact_id: int, session: Session = Depends(get_session)) 
     session.refresh(artifact)
     return artifact
 
+
+
+
+@app.get("/api/artifacts/{artifact_id}/chain", response_model=ArtifactVersionChain)
+def get_artifact_version_chain(artifact_id: int, session: Session = Depends(get_session)) -> ArtifactVersionChain:
+    artifact = session.get(Artifact, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    previous_artifact = session.exec(
+        select(Artifact)
+        .where(
+            Artifact.workspace_id == artifact.workspace_id,
+            Artifact.version_group == artifact.version_group,
+            Artifact.version_no < artifact.version_no,
+        )
+        .order_by(Artifact.version_no.desc())
+    ).first()
+
+    next_artifact = session.exec(
+        select(Artifact)
+        .where(
+            Artifact.workspace_id == artifact.workspace_id,
+            Artifact.version_group == artifact.version_group,
+            Artifact.version_no > artifact.version_no,
+        )
+        .order_by(Artifact.version_no.asc())
+    ).first()
+
+    return ArtifactVersionChain(
+        artifact=artifact,
+        previous_artifact=previous_artifact,
+        next_artifact=next_artifact,
+    )
 
 @app.get("/api/workspaces/{workspace_id}/runs", response_model=list[Run])
 def list_runs(workspace_id: int, session: Session = Depends(get_session)) -> list[Run]:

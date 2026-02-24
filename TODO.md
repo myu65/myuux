@@ -23,7 +23,7 @@
 ## 4. Versioning / Traceability (MVP Priority #4)
 - [x] Add run completion endpoint to register generated artifacts in `out/`.
 - [x] Add explicit artifact publish endpoint.
-- [ ] Add per-version chain API (previous/next by version group).
+- [x] Add per-version chain API (previous/next by version group).
 - [ ] Persist structured `input_artifact_ids` / `output_artifact_ids` as JSON fields.
 
 ## 5. Real format preview adapters (MVP Priority #5)

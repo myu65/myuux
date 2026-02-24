@@ -98,3 +98,44 @@ def test_publish_artifact_marks_published_timestamp(tmp_path: Path) -> None:
         published = main.publish_artifact(artifact.id, session)
 
         assert published.published_at is not None
+
+
+def test_get_artifact_version_chain(tmp_path: Path) -> None:
+    main = load_main(tmp_path)
+
+    with Session(main.engine) as session:
+        workspace = main.create_workspace(main.WorkspaceCreate(name="demo"), session)
+        v1 = main.Artifact(
+            workspace_id=workspace.id,
+            path="out/proposal_v1.pptx",
+            type="pptx",
+            version_group="proposal.pptx",
+            version_no=1,
+        )
+        v2 = main.Artifact(
+            workspace_id=workspace.id,
+            path="out/proposal_v2.pptx",
+            type="pptx",
+            version_group="proposal.pptx",
+            version_no=2,
+        )
+        v3 = main.Artifact(
+            workspace_id=workspace.id,
+            path="out/proposal_v3.pptx",
+            type="pptx",
+            version_group="proposal.pptx",
+            version_no=3,
+        )
+        session.add(v1)
+        session.add(v2)
+        session.add(v3)
+        session.commit()
+        session.refresh(v2)
+
+        chain = main.get_artifact_version_chain(v2.id, session)
+
+        assert chain.artifact.id == v2.id
+        assert chain.previous_artifact is not None
+        assert chain.previous_artifact.id == v1.id
+        assert chain.next_artifact is not None
+        assert chain.next_artifact.id == v3.id
