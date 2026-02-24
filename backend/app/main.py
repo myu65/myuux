@@ -87,6 +87,12 @@ class ChatCreate(BaseModel):
     skill: str = "ppt_revise"
 
 
+class FeatureCatalog(BaseModel):
+    version: str
+    extension_points: list[str]
+    notes: list[str]
+
+
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
@@ -203,3 +209,23 @@ def run_events(run_id: int):
         yield "event: done\ndata: {\"status\": \"success\"}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/api/features", response_model=FeatureCatalog)
+def get_feature_catalog() -> FeatureCatalog:
+    """Return extension points that make feature additions predictable and traceable."""
+    return FeatureCatalog(
+        version="1.0",
+        extension_points=[
+            "workspace_lifecycle",
+            "artifact_upload",
+            "run_creation",
+            "run_events_stream",
+            "chat_trigger",
+        ],
+        notes=[
+            "Use /api/workspaces/{id}/runs for reproducible execution records.",
+            "Use /api/runs/{run_id}/events for live log streaming.",
+            "Store generated files under out/ and keep raw uploads immutable.",
+        ],
+    )

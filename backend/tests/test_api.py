@@ -39,3 +39,15 @@ def test_chat_creates_run(tmp_path: Path) -> None:
     body = chat_res.json()
     assert "message_id" in body
     assert "run_id" in body
+
+
+def test_feature_catalog_lists_extension_points(tmp_path: Path) -> None:
+    client = build_client(tmp_path)
+
+    res = client.get("/api/features")
+    assert res.status_code == 200
+
+    body = res.json()
+    assert body["version"] == "1.0"
+    assert "run_creation" in body["extension_points"]
+    assert "artifact_upload" in body["extension_points"]

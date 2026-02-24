@@ -18,6 +18,7 @@ docker compose up
 
 ## Implemented API (MVP)
 
+- `GET /api/features`
 - `POST /api/workspaces`
 - `GET /api/workspaces`
 - `GET /api/workspaces/{id}`
