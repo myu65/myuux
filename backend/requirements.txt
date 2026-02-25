@@ -1,2 +1,0 @@
-# Legacy compatibility file.
-# Use `uv sync --dev` from `backend/` for local development and CI.
