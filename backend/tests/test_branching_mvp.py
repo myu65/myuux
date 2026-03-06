@@ -56,7 +56,7 @@ def test_regenerate_creates_sibling_assistant(tmp_path: Path) -> None:
         assert regenerated.id != created.assistant_message_id
 
 
-def test_branch_creates_new_user_message(tmp_path: Path) -> None:
+def test_branch_creates_user_and_assistant_path(tmp_path: Path) -> None:
     main = load_main(tmp_path)
 
     with Session(main.engine) as session:
@@ -73,8 +73,11 @@ def test_branch_creates_new_user_message(tmp_path: Path) -> None:
             session,
         )
 
-        assert branched.parent_message_id == created.user_message_id
-        assert branched.role == "user"
+        detail = main.get_conversation(conversation.id, session)
+
+        assert branched.user_message_id
+        assert branched.assistant_message_id
+        assert detail.selected_leaf_message_id == branched.assistant_message_id
 
 
 def test_files_include_and_summary_visible_in_right_panel(tmp_path: Path) -> None:
