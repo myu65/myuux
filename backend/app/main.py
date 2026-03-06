@@ -1,332 +1,75 @@
-import os
-from datetime import datetime
-from typing import Any, Generator, Optional
-from uuid import uuid4
-
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from pydantic import Field as PydanticField
-from sqlmodel import Field, Session, SQLModel, create_engine, select
-
-app = FastAPI(title="Artifact-first Workspace API", version="0.2.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from app.api.conversations import (
+    branch_from_message,
+    create_conversation,
+    create_conversation_message,
+    get_conversation,
+    list_conversations,
+    regenerate_message,
 )
-
-
-def build_engine(database_url: str):
-    return create_engine(database_url, echo=False)
-
-
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./workspace.db")
-engine = build_engine(DATABASE_URL)
-
-
-class Workspace(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    owner_user_id: str = "demo"
-    status: str = "active"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class Artifact(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    workspace_id: int
-    path: str
-    type: str
-    version_group: str
-    version_no: int
-    source_run_id: Optional[int] = None
-    metadata_json: str = "{}"
-    published_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class Run(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    workspace_id: int
-    skill_name: str
-    status: str = "queued"
-    prompt: str
-    params_json: str = "{}"
-    input_artifact_ids: str = "[]"
-    output_artifact_ids: str = "[]"
-    created_by: str = "demo"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    finished_at: Optional[datetime] = None
-
-
-class Message(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    workspace_id: int
-    run_id: Optional[int] = None
-    role: str
-    content: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class Conversation(SQLModel, table=True):
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    title: str
-    owner_user_id: Optional[str] = None
-    selected_leaf_message_id: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ConversationMessage(SQLModel, table=True):
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    conversation_id: str = Field()
-    parent_message_id: Optional[str] = Field(default=None)
-    role: str
-    content_json: str
-    status: str = "completed"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ConversationRun(SQLModel, table=True):
-    __tablename__ = "conversation_run"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    conversation_id: str = Field()
-    message_id: Optional[str] = Field(default=None)
-    branch_leaf_message_id: Optional[str] = None
-    run_type: str
-    status: str
-    model_name: Optional[str] = None
-    summary: Optional[str] = None
-    error_text: Optional[str] = None
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class FileRecord(SQLModel, table=True):
-    __tablename__ = "file_record"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    conversation_id: str = Field()
-    filename: str
-    storage_backend: str
-    storage_key: str
-    mime_type: Optional[str] = None
-    size_bytes: Optional[int] = None
-    editor_type: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class FileBinding(SQLModel, table=True):
-    __tablename__ = "file_binding"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    conversation_id: str = Field()
-    file_id: str = Field()
-    branch_id: Optional[str] = None
-    included_in_context: bool = False
-    summary_mode: str = "none"
-    indexing_mode: str = "none"
-    edit_mode: str = "readonly"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class FileSummary(SQLModel, table=True):
-    __tablename__ = "file_summary"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    file_id: str = Field()
-    conversation_id: str = Field()
-    branch_id: Optional[str] = None
-    summary_type: str
-    content: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ConversationArtifact(SQLModel, table=True):
-    __tablename__ = "conversation_artifact"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    conversation_id: str = Field()
-    run_id: str = Field()
-    message_id: Optional[str] = None
-    file_id: Optional[str] = None
-    artifact_type: str
-    title: str
-    storage_backend: str
-    storage_key: str
-    metadata_json: str = "{}"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class WorkspaceCreate(BaseModel):
-    name: str
-
-
-class RunCreate(BaseModel):
-    skill: str
-    prompt: str
-    input_artifact_ids: list[int] = PydanticField(default_factory=list)
-    params: dict = PydanticField(default_factory=dict)
-
-
-class RunComplete(BaseModel):
-    output_filename: str
-    artifact_type: str
-
-
-class RunCompleteResponse(BaseModel):
-    run_id: int
-    status: str
-    output_artifact: Artifact
-
-
-class ArtifactVersionChain(BaseModel):
-    artifact: Artifact
-    previous_artifact: Artifact | None = None
-    next_artifact: Artifact | None = None
-
-
-class ChatCreate(BaseModel):
-    prompt: str
-    skill: str = "ppt_revise"
-
-
-class FeatureCatalog(BaseModel):
-    version: str
-    extension_points: list[str]
-    notes: list[str]
-
-
-class ConversationCreate(BaseModel):
-    title: str
-
-
-class ContentPart(BaseModel):
-    type: str = "text"
-    text: str
-
-
-class ConversationMessageCreate(BaseModel):
-    text: str
-    parent_message_id: Optional[str] = None
-
-
-class BranchCreate(BaseModel):
-    text: str
-
-
-class MessagePathView(BaseModel):
-    id: str
-    parent_message_id: Optional[str] = None
-    role: str
-    text: str
-
-
-class MessageCreateResult(BaseModel):
-    user_message_id: str
-    assistant_message_id: str
-    run_id: str
-
-
-class ConversationDetailResponse(BaseModel):
-    id: str
-    title: str
-    selected_leaf_message_id: Optional[str]
-    selected_path_messages: list[MessagePathView]
-
-
-class UploadUrlCreate(BaseModel):
-    filename: str
-    content_type: Optional[str] = None
-
-
-class FileRegisterCreate(BaseModel):
-    conversation_id: str
-    filename: str
-    storage_backend: str
-    storage_key: str
-    mime_type: Optional[str] = None
-    size_bytes: Optional[int] = None
-
-
-class FileView(BaseModel):
-    id: str
-    conversation_id: str
-    filename: str
-    storage_backend: str
-    storage_key: str
-    mime_type: Optional[str] = None
-    size_bytes: Optional[int] = None
-    included_in_context: bool = False
-
-
-class RightPanelResponse(BaseModel):
-    results: dict[str, Any]
-    files: list[FileView]
-    summaries: dict[str, Optional[str]]
-    agent: dict[str, Any]
-
-
-MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-5.4")
-
-
-def get_session() -> Generator[Session, None, None]:
-    with Session(engine) as session:
-        yield session
-
-
-def init_db() -> None:
-    SQLModel.metadata.create_all(engine)
-
-
-def build_message_path(messages_by_id: dict[str, ConversationMessage], leaf_id: str) -> list[ConversationMessage]:
-    path: list[ConversationMessage] = []
-    current_id = leaf_id
-    while current_id:
-        current = messages_by_id.get(current_id)
-        if not current:
-            break
-        path.append(current)
-        current_id = current.parent_message_id or ""
-    path.reverse()
-    return path
-
-
-def get_or_create_binding(session: Session, conversation_id: str, file_id: str) -> FileBinding:
-    statement = select(FileBinding).where(
-        FileBinding.conversation_id == conversation_id,
-        FileBinding.file_id == file_id,
-    )
-    binding = session.exec(statement).first()
-    if binding:
-        return binding
-    binding = FileBinding(conversation_id=conversation_id, file_id=file_id)
-    session.add(binding)
-    session.commit()
-    session.refresh(binding)
-    return binding
-
-
-def fake_assistant_reply(text: str) -> str:
-    return f"MVP assistant response: {text}"
-
-
-def message_text(content_json: str) -> str:
-    if '"text": "' not in content_json:
-        return content_json
-    return content_json.split('"text": "', 1)[1].rsplit('"', 1)[0]
+from app.api.conversations import (
+    register_routes as register_conversation_routes,
+)
+from app.api.files import (
+    create_upload_url,
+    exclude_file,
+    get_conversation_right_panel,
+    include_file,
+    list_conversation_files,
+    register_file,
+    summarize_file,
+)
+from app.api.files import (
+    register_routes as register_file_routes,
+)
+from app.api.runs import (
+    list_conversation_artifacts,
+    list_conversation_runs,
+)
+from app.api.runs import (
+    register_routes as register_run_routes,
+)
+from app.api.workspaces import (
+    chat_trigger,
+    complete_run,
+    create_run,
+    create_workspace,
+    get_artifact_version_chain,
+    get_feature_catalog,
+    get_run,
+    get_workspace,
+    list_artifacts,
+    list_runs,
+    list_workspaces,
+    publish_artifact,
+    run_events,
+    upload_file,
+)
+from app.api.workspaces import (
+    register_routes as register_workspace_routes,
+)
+from app.db import engine, init_db
+from app.models import Artifact, Conversation, ConversationMessage, FileRecord, Workspace
+from app.schemas import (
+    BranchCreate,
+    ChatCreate,
+    ConversationCreate,
+    ConversationMessageCreate,
+    FileRegisterCreate,
+    RunComplete,
+    RunCreate,
+    WorkspaceCreate,
+)
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Artifact-first Workspace API", version="0.3.0")
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+)
+register_workspace_routes(app)
+register_conversation_routes(app)
+register_file_routes(app)
+register_run_routes(app)
 
 
 @app.on_event("startup")
@@ -334,562 +77,50 @@ def startup() -> None:
     init_db()
 
 
-@app.post("/api/workspaces", response_model=Workspace)
-def create_workspace(payload: WorkspaceCreate, session: Session = Depends(get_session)) -> Workspace:
-    workspace = Workspace(name=payload.name)
-    session.add(workspace)
-    session.commit()
-    session.refresh(workspace)
-    return workspace
-
-
-@app.get("/api/workspaces", response_model=list[Workspace])
-def list_workspaces(session: Session = Depends(get_session)) -> list[Workspace]:
-    return session.exec(select(Workspace).order_by(Workspace.created_at.desc())).all()
-
-
-@app.get("/api/workspaces/{workspace_id}", response_model=Workspace)
-def get_workspace(workspace_id: int, session: Session = Depends(get_session)) -> Workspace:
-    workspace = session.get(Workspace, workspace_id)
-    if not workspace:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return workspace
-
-
-@app.post("/api/workspaces/{workspace_id}/upload", response_model=Artifact)
-def upload_file(workspace_id: int, file: UploadFile = File(...), session: Session = Depends(get_session)) -> Artifact:
-    workspace = session.get(Workspace, workspace_id)
-    if not workspace:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    artifact = Artifact(
-        workspace_id=workspace_id,
-        path=f"raw/{file.filename}",
-        type=file.filename.split(".")[-1],
-        version_group=file.filename,
-        version_no=1,
-    )
-    session.add(artifact)
-    session.commit()
-    session.refresh(artifact)
-    return artifact
-
-
-@app.get("/api/workspaces/{workspace_id}/artifacts", response_model=list[Artifact])
-def list_artifacts(workspace_id: int, session: Session = Depends(get_session)) -> list[Artifact]:
-    return session.exec(select(Artifact).where(Artifact.workspace_id == workspace_id)).all()
-
-
-@app.post("/api/workspaces/{workspace_id}/runs", response_model=Run)
-def create_run(workspace_id: int, payload: RunCreate, session: Session = Depends(get_session)) -> Run:
-    run = Run(
-        workspace_id=workspace_id,
-        skill_name=payload.skill,
-        prompt=payload.prompt,
-        input_artifact_ids=str(payload.input_artifact_ids),
-        params_json=str(payload.params),
-        status="running",
-    )
-    session.add(run)
-    session.commit()
-    session.refresh(run)
-    return run
-
-
-@app.post("/api/runs/{run_id}/complete", response_model=RunCompleteResponse)
-def complete_run(run_id: int, payload: RunComplete, session: Session = Depends(get_session)) -> RunCompleteResponse:
-    run = session.get(Run, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="run not found")
-
-    latest_in_group = session.exec(
-        select(Artifact)
-        .where(
-            Artifact.workspace_id == run.workspace_id,
-            Artifact.version_group == payload.output_filename,
-        )
-        .order_by(Artifact.version_no.desc())
-    ).first()
-
-    next_version = 1 if latest_in_group is None else latest_in_group.version_no + 1
-    artifact = Artifact(
-        workspace_id=run.workspace_id,
-        path=f"out/{payload.output_filename}",
-        type=payload.artifact_type,
-        version_group=payload.output_filename,
-        version_no=next_version,
-        source_run_id=run.id,
-    )
-    session.add(artifact)
-
-    run.status = "success"
-    run.finished_at = datetime.utcnow()
-    run.output_artifact_ids = str([artifact.id])
-    session.add(run)
-    session.commit()
-    session.refresh(artifact)
-
-    return RunCompleteResponse(run_id=run.id, status=run.status, output_artifact=artifact)
-
-
-@app.post("/api/artifacts/{artifact_id}/publish", response_model=Artifact)
-def publish_artifact(artifact_id: int, session: Session = Depends(get_session)) -> Artifact:
-    artifact = session.get(Artifact, artifact_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="artifact not found")
-
-    artifact.published_at = datetime.utcnow()
-    session.add(artifact)
-    session.commit()
-    session.refresh(artifact)
-    return artifact
-
-
-@app.get("/api/artifacts/{artifact_id}/chain", response_model=ArtifactVersionChain)
-def get_artifact_version_chain(artifact_id: int, session: Session = Depends(get_session)) -> ArtifactVersionChain:
-    artifact = session.get(Artifact, artifact_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="artifact not found")
-
-    previous_artifact = session.exec(
-        select(Artifact)
-        .where(
-            Artifact.workspace_id == artifact.workspace_id,
-            Artifact.version_group == artifact.version_group,
-            Artifact.version_no < artifact.version_no,
-        )
-        .order_by(Artifact.version_no.desc())
-    ).first()
-
-    next_artifact = session.exec(
-        select(Artifact)
-        .where(
-            Artifact.workspace_id == artifact.workspace_id,
-            Artifact.version_group == artifact.version_group,
-            Artifact.version_no > artifact.version_no,
-        )
-        .order_by(Artifact.version_no.asc())
-    ).first()
-
-    return ArtifactVersionChain(
-        artifact=artifact,
-        previous_artifact=previous_artifact,
-        next_artifact=next_artifact,
-    )
-
-
-@app.get("/api/workspaces/{workspace_id}/runs", response_model=list[Run])
-def list_runs(workspace_id: int, session: Session = Depends(get_session)) -> list[Run]:
-    statement = select(Run).where(Run.workspace_id == workspace_id).order_by(Run.created_at.desc())
-    return session.exec(statement).all()
-
-
-@app.get("/api/runs/{run_id}", response_model=Run)
-def get_run(run_id: int, session: Session = Depends(get_session)) -> Run:
-    run = session.get(Run, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="run not found")
-    return run
-
-
-@app.post("/api/workspaces/{workspace_id}/chat")
-def chat_trigger(workspace_id: int, payload: ChatCreate, session: Session = Depends(get_session)):
-    message = Message(workspace_id=workspace_id, role="user", content=payload.prompt)
-    session.add(message)
-    session.commit()
-    run = create_run(
-        workspace_id,
-        RunCreate(skill=payload.skill, prompt=payload.prompt, input_artifact_ids=[], params={}),
-        session,
-    )
-    return {"message_id": message.id, "run_id": run.id}
-
-
-@app.get("/api/runs/{run_id}/events")
-def run_events(run_id: int):
-    def event_stream() -> Generator[str, None, None]:
-        steps = [
-            "validate inputs",
-            "load template",
-            "generate slide outline",
-            "render chart",
-            "write out/proposal_v3.pptx",
-        ]
-        for idx, step in enumerate(steps, start=1):
-            yield f"event: log\ndata: {{\"run_id\": {run_id}, \"step\": {idx}, \"message\": \"{step}\"}}\n\n"
-        yield "event: done\ndata: {\"status\": \"success\"}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-@app.get("/api/features", response_model=FeatureCatalog)
-def get_feature_catalog() -> FeatureCatalog:
-    """Return extension points that make feature additions predictable and traceable."""
-    return FeatureCatalog(
-        version="1.1",
-        extension_points=[
-            "workspace_lifecycle",
-            "artifact_upload",
-            "run_creation",
-            "run_completion",
-            "artifact_publish",
-            "run_events_stream",
-            "chat_trigger",
-        ],
-        notes=[
-            "Use /api/workspaces/{id}/runs for reproducible execution records.",
-            "Use /api/runs/{run_id}/events for live log streaming.",
-            "Store generated files under out/ and keep raw uploads immutable.",
-            "Use /api/runs/{run_id}/complete to register generated artifacts.",
-            "Use /api/artifacts/{artifact_id}/publish for explicit publication.",
-        ],
-    )
-
-
-@app.get("/api/conversations", response_model=list[Conversation])
-def list_conversations(session: Session = Depends(get_session)) -> list[Conversation]:
-    return session.exec(select(Conversation).order_by(Conversation.updated_at.desc())).all()
-
-
-@app.post("/api/conversations", response_model=Conversation)
-def create_conversation(payload: ConversationCreate, session: Session = Depends(get_session)) -> Conversation:
-    conversation = Conversation(title=payload.title)
-    session.add(conversation)
-    session.commit()
-    session.refresh(conversation)
-    return conversation
-
-
-def to_path_view(message: ConversationMessage) -> MessagePathView:
-    return MessagePathView(
-        id=message.id,
-        parent_message_id=message.parent_message_id,
-        role=message.role,
-        text=message_text(message.content_json),
-    )
-
-
-@app.get("/api/conversations/{conversation_id}", response_model=ConversationDetailResponse)
-def get_conversation(conversation_id: str, session: Session = Depends(get_session)) -> ConversationDetailResponse:
-    conversation = session.get(Conversation, conversation_id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="conversation not found")
-
-    statement = select(ConversationMessage).where(ConversationMessage.conversation_id == conversation_id)
-    messages = session.exec(statement).all()
-    messages_by_id = {message.id: message for message in messages}
-    selected_path: list[ConversationMessage] = []
-    if conversation.selected_leaf_message_id:
-        selected_path = build_message_path(messages_by_id, conversation.selected_leaf_message_id)
-
-    return ConversationDetailResponse(
-        id=conversation.id,
-        title=conversation.title,
-        selected_leaf_message_id=conversation.selected_leaf_message_id,
-        selected_path_messages=[to_path_view(message) for message in selected_path],
-    )
-
-
-@app.post("/api/conversations/{conversation_id}/messages", response_model=MessageCreateResult)
-def create_conversation_message(
-    conversation_id: str,
-    payload: ConversationMessageCreate,
-    session: Session = Depends(get_session),
-) -> MessageCreateResult:
-    conversation = session.get(Conversation, conversation_id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="conversation not found")
-
-    parent_message_id = payload.parent_message_id or conversation.selected_leaf_message_id
-    user_message = ConversationMessage(
-        conversation_id=conversation_id,
-        parent_message_id=parent_message_id,
-        role="user",
-        content_json=f'{{"parts": [{{"type": "text", "text": "{payload.text}"}}]}}',
-    )
-    session.add(user_message)
-    session.commit()
-    session.refresh(user_message)
-
-    run = ConversationRun(
-        conversation_id=conversation_id,
-        message_id=user_message.id,
-        branch_leaf_message_id=user_message.id,
-        run_type="chat",
-        status="running",
-        model_name=MODEL_NAME,
-        started_at=datetime.utcnow(),
-    )
-    session.add(run)
-    session.commit()
-    session.refresh(run)
-
-    assistant_message = ConversationMessage(
-        conversation_id=conversation_id,
-        parent_message_id=user_message.id,
-        role="assistant",
-        content_json=f'{{"parts": [{{"type": "text", "text": "{fake_assistant_reply(payload.text)}"}}]}}',
-    )
-    session.add(assistant_message)
-
-    run.status = "completed"
-    run.finished_at = datetime.utcnow()
-    run.summary = "chat completed"
-    run.updated_at = datetime.utcnow()
-    conversation.selected_leaf_message_id = assistant_message.id
-    conversation.updated_at = datetime.utcnow()
-
-    session.add(run)
-    session.add(conversation)
-    session.commit()
-    session.refresh(assistant_message)
-
-    return MessageCreateResult(
-        user_message_id=user_message.id,
-        assistant_message_id=assistant_message.id,
-        run_id=run.id,
-    )
-
-
-@app.post("/api/messages/{message_id}/regenerate", response_model=ConversationMessage)
-def regenerate_message(message_id: str, session: Session = Depends(get_session)) -> ConversationMessage:
-    target_message = session.get(ConversationMessage, message_id)
-    if not target_message:
-        raise HTTPException(status_code=404, detail="message not found")
-
-    if target_message.role != "user":
-        raise HTTPException(status_code=400, detail="regenerate target must be a user message")
-
-    assistant = ConversationMessage(
-        conversation_id=target_message.conversation_id,
-        parent_message_id=target_message.id,
-        role="assistant",
-        content_json='{"parts": [{"type": "text", "text": "regenerated assistant response"}]}',
-    )
-    session.add(assistant)
-
-    run = ConversationRun(
-        conversation_id=target_message.conversation_id,
-        message_id=assistant.id,
-        branch_leaf_message_id=assistant.id,
-        run_type="chat",
-        status="completed",
-        model_name=MODEL_NAME,
-        summary="regenerate completed",
-        started_at=datetime.utcnow(),
-        finished_at=datetime.utcnow(),
-    )
-    session.add(run)
-
-    conversation = session.get(Conversation, target_message.conversation_id)
-    if conversation:
-        conversation.selected_leaf_message_id = assistant.id
-        conversation.updated_at = datetime.utcnow()
-        session.add(conversation)
-
-    session.commit()
-    session.refresh(assistant)
-    return assistant
-
-
-@app.post("/api/messages/{message_id}/branch", response_model=ConversationMessage)
-def branch_from_message(
-    message_id: str,
-    payload: BranchCreate,
-    session: Session = Depends(get_session),
-) -> ConversationMessage:
-    target_message = session.get(ConversationMessage, message_id)
-    if not target_message:
-        raise HTTPException(status_code=404, detail="message not found")
-
-    branch_user = ConversationMessage(
-        conversation_id=target_message.conversation_id,
-        parent_message_id=target_message.id,
-        role="user",
-        content_json=f'{{"parts": [{{"type": "text", "text": "{payload.text}"}}]}}',
-    )
-    session.add(branch_user)
-
-    conversation = session.get(Conversation, target_message.conversation_id)
-    if conversation:
-        conversation.selected_leaf_message_id = branch_user.id
-        conversation.updated_at = datetime.utcnow()
-        session.add(conversation)
-
-    session.commit()
-    session.refresh(branch_user)
-    return branch_user
-
-
-@app.post("/api/files/upload-url")
-def create_upload_url(payload: UploadUrlCreate):
-    key = f"conversations/{uuid4()}-{payload.filename}"
-    return {"storage_backend": "local", "storage_key": key, "upload_method": "direct_register"}
-
-
-@app.post("/api/files/register", response_model=FileRecord)
-def register_file(payload: FileRegisterCreate, session: Session = Depends(get_session)) -> FileRecord:
-    conversation = session.get(Conversation, payload.conversation_id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="conversation not found")
-
-    file_record = FileRecord(
-        conversation_id=payload.conversation_id,
-        filename=payload.filename,
-        storage_backend=payload.storage_backend,
-        storage_key=payload.storage_key,
-        mime_type=payload.mime_type,
-        size_bytes=payload.size_bytes,
-    )
-    session.add(file_record)
-    session.commit()
-    session.refresh(file_record)
-
-    binding = FileBinding(conversation_id=payload.conversation_id, file_id=file_record.id)
-    session.add(binding)
-    session.commit()
-
-    return file_record
-
-
-@app.get("/api/conversations/{conversation_id}/files", response_model=list[FileView])
-def list_conversation_files(conversation_id: str, session: Session = Depends(get_session)) -> list[FileView]:
-    files = session.exec(select(FileRecord).where(FileRecord.conversation_id == conversation_id)).all()
-    views: list[FileView] = []
-    for file_record in files:
-        binding = get_or_create_binding(session, conversation_id, file_record.id)
-        views.append(
-            FileView(
-                id=file_record.id,
-                conversation_id=file_record.conversation_id,
-                filename=file_record.filename,
-                storage_backend=file_record.storage_backend,
-                storage_key=file_record.storage_key,
-                mime_type=file_record.mime_type,
-                size_bytes=file_record.size_bytes,
-                included_in_context=binding.included_in_context,
-            )
-        )
-    return views
-
-
-@app.post("/api/conversations/{conversation_id}/files/{file_id}/include", response_model=FileBinding)
-def include_file(conversation_id: str, file_id: str, session: Session = Depends(get_session)) -> FileBinding:
-    binding = get_or_create_binding(session, conversation_id, file_id)
-    binding.included_in_context = True
-    binding.updated_at = datetime.utcnow()
-    session.add(binding)
-    session.commit()
-    session.refresh(binding)
-    return binding
-
-
-@app.post("/api/conversations/{conversation_id}/files/{file_id}/exclude", response_model=FileBinding)
-def exclude_file(conversation_id: str, file_id: str, session: Session = Depends(get_session)) -> FileBinding:
-    binding = get_or_create_binding(session, conversation_id, file_id)
-    binding.included_in_context = False
-    binding.updated_at = datetime.utcnow()
-    session.add(binding)
-    session.commit()
-    session.refresh(binding)
-    return binding
-
-
-@app.post("/api/conversations/{conversation_id}/files/{file_id}/summarize", response_model=FileSummary)
-def summarize_file(conversation_id: str, file_id: str, session: Session = Depends(get_session)) -> FileSummary:
-    file_record = session.get(FileRecord, file_id)
-    if not file_record:
-        raise HTTPException(status_code=404, detail="file not found")
-
-    run = ConversationRun(
-        conversation_id=conversation_id,
-        message_id=None,
-        branch_leaf_message_id=None,
-        run_type="summarize_file",
-        status="completed",
-        model_name=MODEL_NAME,
-        summary=f"summary generated for {file_record.filename}",
-        started_at=datetime.utcnow(),
-        finished_at=datetime.utcnow(),
-    )
-    session.add(run)
-
-    summary = FileSummary(
-        file_id=file_id,
-        conversation_id=conversation_id,
-        summary_type="short",
-        content=f"Summary for {file_record.filename}",
-    )
-    session.add(summary)
-    session.commit()
-    session.refresh(summary)
-    return summary
-
-
-@app.get("/api/conversations/{conversation_id}/right-panel", response_model=RightPanelResponse)
-def get_conversation_right_panel(conversation_id: str, session: Session = Depends(get_session)) -> RightPanelResponse:
-    runs = session.exec(
-        select(ConversationRun)
-        .where(ConversationRun.conversation_id == conversation_id)
-        .order_by(ConversationRun.created_at.desc())
-    ).all()
-    artifacts = session.exec(
-        select(ConversationArtifact)
-        .where(ConversationArtifact.conversation_id == conversation_id)
-        .order_by(ConversationArtifact.created_at.desc())
-    ).all()
-    files = list_conversation_files(conversation_id, session)
-
-    latest_file_summary = session.exec(
-        select(FileSummary)
-        .where(FileSummary.conversation_id == conversation_id)
-        .order_by(FileSummary.created_at.desc())
-    ).first()
-
-    return RightPanelResponse(
-        results={
-            "latest_runs": [
-                {
-                    "id": run.id,
-                    "run_type": run.run_type,
-                    "status": run.status,
-                    "summary": run.summary,
-                    "error_text": run.error_text,
-                }
-                for run in runs[:10]
-            ],
-            "latest_artifacts": [
-                {
-                    "id": artifact.id,
-                    "title": artifact.title,
-                    "artifact_type": artifact.artifact_type,
-                    "storage_key": artifact.storage_key,
-                }
-                for artifact in artifacts[:10]
-            ],
-        },
-        files=files,
-        summaries={
-            "conversation_summary": None,
-            "branch_summary": None,
-            "latest_file_summary": latest_file_summary.content if latest_file_summary else None,
-        },
-        agent={
-            "model": MODEL_NAME,
-            "store": False,
-        },
-    )
-
-
-@app.get("/api/conversations/{conversation_id}/runs", response_model=list[ConversationRun])
-def list_conversation_runs(conversation_id: str, session: Session = Depends(get_session)) -> list[ConversationRun]:
-    statement = select(ConversationRun).where(ConversationRun.conversation_id == conversation_id)
-    return session.exec(statement).all()
-
-
-@app.get("/api/conversations/{conversation_id}/artifacts", response_model=list[ConversationArtifact])
-def list_conversation_artifacts(
-    conversation_id: str,
-    session: Session = Depends(get_session),
-) -> list[ConversationArtifact]:
-    statement = select(ConversationArtifact).where(ConversationArtifact.conversation_id == conversation_id)
-    return session.exec(statement).all()
+__all__ = [
+    "app",
+    "engine",
+    "init_db",
+    "Workspace",
+    "Artifact",
+    "Conversation",
+    "ConversationMessage",
+    "FileRecord",
+    "WorkspaceCreate",
+    "RunCreate",
+    "RunComplete",
+    "ChatCreate",
+    "ConversationCreate",
+    "ConversationMessageCreate",
+    "BranchCreate",
+    "FileRegisterCreate",
+    "create_workspace",
+    "list_workspaces",
+    "get_workspace",
+    "upload_file",
+    "list_artifacts",
+    "create_run",
+    "complete_run",
+    "publish_artifact",
+    "get_artifact_version_chain",
+    "list_runs",
+    "get_run",
+    "chat_trigger",
+    "run_events",
+    "get_feature_catalog",
+    "list_conversations",
+    "create_conversation",
+    "get_conversation",
+    "create_conversation_message",
+    "regenerate_message",
+    "branch_from_message",
+    "create_upload_url",
+    "register_file",
+    "list_conversation_files",
+    "include_file",
+    "exclude_file",
+    "summarize_file",
+    "get_conversation_right_panel",
+    "list_conversation_runs",
+    "list_conversation_artifacts",
+]
