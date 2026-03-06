@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from app.models import Conversation, ConversationRun, FileBinding, FileRecord, FileSummary
@@ -34,7 +35,12 @@ def summarize_file(session: Session, conversation_id: str, file_id: str, runner:
     if not binding.included_in_context:
         raise HTTPException(status_code=400, detail="file must be included before summarize")
 
-    result = runner.chat(prompt=f"Summarize file: {file_record.filename}", files=[])
+    file_payload = {
+        "filename": file_record.filename,
+        "content": f"placeholder content for {file_record.filename}".encode(),
+        "content_type": file_record.mime_type,
+    }
+    result = runner.chat(prompt=f"Summarize file: {file_record.filename}", files=[file_payload])
     run = ConversationRun(
         conversation_id=conversation_id,
         message_id=None,
@@ -43,7 +49,7 @@ def summarize_file(session: Session, conversation_id: str, file_id: str, runner:
         status="completed",
         model_name=runner.model_name,
         summary=f"summary generated for {file_record.filename}",
-        warnings_json="[]",
+        warnings_json=json.dumps(result.warnings),
         started_at=datetime.utcnow(),
         finished_at=datetime.utcnow(),
     )
