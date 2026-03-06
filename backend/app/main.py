@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from pydantic import Field as PydanticField
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-app = FastAPI(title="Artifact-first Workspace API", version="0.1.0")
+app = FastAPI(title="Artifact-first Workspace API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -71,6 +72,104 @@ class Message(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class Conversation(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    title: str
+    owner_user_id: Optional[str] = None
+    selected_leaf_message_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationMessage(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    conversation_id: str = Field()
+    parent_message_id: Optional[str] = Field(default=None)
+    role: str
+    content_json: str
+    status: str = "completed"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationRun(SQLModel, table=True):
+    __tablename__ = "conversation_run"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    conversation_id: str = Field()
+    message_id: Optional[str] = Field(default=None)
+    branch_leaf_message_id: Optional[str] = None
+    run_type: str
+    status: str
+    model_name: Optional[str] = None
+    summary: Optional[str] = None
+    error_text: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FileRecord(SQLModel, table=True):
+    __tablename__ = "file_record"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    conversation_id: str = Field()
+    filename: str
+    storage_backend: str
+    storage_key: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    editor_type: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FileBinding(SQLModel, table=True):
+    __tablename__ = "file_binding"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    conversation_id: str = Field()
+    file_id: str = Field()
+    branch_id: Optional[str] = None
+    included_in_context: bool = False
+    summary_mode: str = "none"
+    indexing_mode: str = "none"
+    edit_mode: str = "readonly"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FileSummary(SQLModel, table=True):
+    __tablename__ = "file_summary"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    file_id: str = Field()
+    conversation_id: str = Field()
+    branch_id: Optional[str] = None
+    summary_type: str
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationArtifact(SQLModel, table=True):
+    __tablename__ = "conversation_artifact"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    conversation_id: str = Field()
+    run_id: str = Field()
+    message_id: Optional[str] = None
+    file_id: Optional[str] = None
+    artifact_type: str
+    title: str
+    storage_backend: str
+    storage_key: str
+    metadata_json: str = "{}"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class WorkspaceCreate(BaseModel):
     name: str
 
@@ -110,6 +209,79 @@ class FeatureCatalog(BaseModel):
     notes: list[str]
 
 
+class ConversationCreate(BaseModel):
+    title: str
+
+
+class ContentPart(BaseModel):
+    type: str = "text"
+    text: str
+
+
+class ConversationMessageCreate(BaseModel):
+    text: str
+    parent_message_id: Optional[str] = None
+
+
+class BranchCreate(BaseModel):
+    text: str
+
+
+class MessagePathView(BaseModel):
+    id: str
+    parent_message_id: Optional[str] = None
+    role: str
+    text: str
+
+
+class MessageCreateResult(BaseModel):
+    user_message_id: str
+    assistant_message_id: str
+    run_id: str
+
+
+class ConversationDetailResponse(BaseModel):
+    id: str
+    title: str
+    selected_leaf_message_id: Optional[str]
+    selected_path_messages: list[MessagePathView]
+
+
+class UploadUrlCreate(BaseModel):
+    filename: str
+    content_type: Optional[str] = None
+
+
+class FileRegisterCreate(BaseModel):
+    conversation_id: str
+    filename: str
+    storage_backend: str
+    storage_key: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+
+class FileView(BaseModel):
+    id: str
+    conversation_id: str
+    filename: str
+    storage_backend: str
+    storage_key: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    included_in_context: bool = False
+
+
+class RightPanelResponse(BaseModel):
+    results: dict[str, Any]
+    files: list[FileView]
+    summaries: dict[str, Optional[str]]
+    agent: dict[str, Any]
+
+
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-5.4")
+
+
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
@@ -117,6 +289,44 @@ def get_session() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+
+
+def build_message_path(messages_by_id: dict[str, ConversationMessage], leaf_id: str) -> list[ConversationMessage]:
+    path: list[ConversationMessage] = []
+    current_id = leaf_id
+    while current_id:
+        current = messages_by_id.get(current_id)
+        if not current:
+            break
+        path.append(current)
+        current_id = current.parent_message_id or ""
+    path.reverse()
+    return path
+
+
+def get_or_create_binding(session: Session, conversation_id: str, file_id: str) -> FileBinding:
+    statement = select(FileBinding).where(
+        FileBinding.conversation_id == conversation_id,
+        FileBinding.file_id == file_id,
+    )
+    binding = session.exec(statement).first()
+    if binding:
+        return binding
+    binding = FileBinding(conversation_id=conversation_id, file_id=file_id)
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    return binding
+
+
+def fake_assistant_reply(text: str) -> str:
+    return f"MVP assistant response: {text}"
+
+
+def message_text(content_json: str) -> str:
+    if '"text": "' not in content_json:
+        return content_json
+    return content_json.split('"text": "', 1)[1].rsplit('"', 1)[0]
 
 
 @app.on_event("startup")
@@ -199,8 +409,8 @@ def complete_run(run_id: int, payload: RunComplete, session: Session = Depends(g
         )
         .order_by(Artifact.version_no.desc())
     ).first()
-    next_version = (latest_in_group.version_no + 1) if latest_in_group else 1
 
+    next_version = 1 if latest_in_group is None else latest_in_group.version_no + 1
     artifact = Artifact(
         workspace_id=run.workspace_id,
         path=f"out/{payload.output_filename}",
@@ -213,13 +423,10 @@ def complete_run(run_id: int, payload: RunComplete, session: Session = Depends(g
 
     run.status = "success"
     run.finished_at = datetime.utcnow()
-    run.output_artifact_ids = str([artifact.id] if artifact.id else [])
-    session.add(run)
-    session.commit()
-    session.refresh(artifact)
     run.output_artifact_ids = str([artifact.id])
     session.add(run)
     session.commit()
+    session.refresh(artifact)
 
     return RunCompleteResponse(run_id=run.id, status=run.status, output_artifact=artifact)
 
@@ -235,8 +442,6 @@ def publish_artifact(artifact_id: int, session: Session = Depends(get_session)) 
     session.commit()
     session.refresh(artifact)
     return artifact
-
-
 
 
 @app.get("/api/artifacts/{artifact_id}/chain", response_model=ArtifactVersionChain)
@@ -271,9 +476,11 @@ def get_artifact_version_chain(artifact_id: int, session: Session = Depends(get_
         next_artifact=next_artifact,
     )
 
+
 @app.get("/api/workspaces/{workspace_id}/runs", response_model=list[Run])
 def list_runs(workspace_id: int, session: Session = Depends(get_session)) -> list[Run]:
-    return session.exec(select(Run).where(Run.workspace_id == workspace_id).order_by(Run.created_at.desc())).all()
+    statement = select(Run).where(Run.workspace_id == workspace_id).order_by(Run.created_at.desc())
+    return session.exec(statement).all()
 
 
 @app.get("/api/runs/{run_id}", response_model=Run)
@@ -336,3 +543,353 @@ def get_feature_catalog() -> FeatureCatalog:
             "Use /api/artifacts/{artifact_id}/publish for explicit publication.",
         ],
     )
+
+
+@app.get("/api/conversations", response_model=list[Conversation])
+def list_conversations(session: Session = Depends(get_session)) -> list[Conversation]:
+    return session.exec(select(Conversation).order_by(Conversation.updated_at.desc())).all()
+
+
+@app.post("/api/conversations", response_model=Conversation)
+def create_conversation(payload: ConversationCreate, session: Session = Depends(get_session)) -> Conversation:
+    conversation = Conversation(title=payload.title)
+    session.add(conversation)
+    session.commit()
+    session.refresh(conversation)
+    return conversation
+
+
+def to_path_view(message: ConversationMessage) -> MessagePathView:
+    return MessagePathView(
+        id=message.id,
+        parent_message_id=message.parent_message_id,
+        role=message.role,
+        text=message_text(message.content_json),
+    )
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ConversationDetailResponse)
+def get_conversation(conversation_id: str, session: Session = Depends(get_session)) -> ConversationDetailResponse:
+    conversation = session.get(Conversation, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    statement = select(ConversationMessage).where(ConversationMessage.conversation_id == conversation_id)
+    messages = session.exec(statement).all()
+    messages_by_id = {message.id: message for message in messages}
+    selected_path: list[ConversationMessage] = []
+    if conversation.selected_leaf_message_id:
+        selected_path = build_message_path(messages_by_id, conversation.selected_leaf_message_id)
+
+    return ConversationDetailResponse(
+        id=conversation.id,
+        title=conversation.title,
+        selected_leaf_message_id=conversation.selected_leaf_message_id,
+        selected_path_messages=[to_path_view(message) for message in selected_path],
+    )
+
+
+@app.post("/api/conversations/{conversation_id}/messages", response_model=MessageCreateResult)
+def create_conversation_message(
+    conversation_id: str,
+    payload: ConversationMessageCreate,
+    session: Session = Depends(get_session),
+) -> MessageCreateResult:
+    conversation = session.get(Conversation, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    parent_message_id = payload.parent_message_id or conversation.selected_leaf_message_id
+    user_message = ConversationMessage(
+        conversation_id=conversation_id,
+        parent_message_id=parent_message_id,
+        role="user",
+        content_json=f'{{"parts": [{{"type": "text", "text": "{payload.text}"}}]}}',
+    )
+    session.add(user_message)
+    session.commit()
+    session.refresh(user_message)
+
+    run = ConversationRun(
+        conversation_id=conversation_id,
+        message_id=user_message.id,
+        branch_leaf_message_id=user_message.id,
+        run_type="chat",
+        status="running",
+        model_name=MODEL_NAME,
+        started_at=datetime.utcnow(),
+    )
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    assistant_message = ConversationMessage(
+        conversation_id=conversation_id,
+        parent_message_id=user_message.id,
+        role="assistant",
+        content_json=f'{{"parts": [{{"type": "text", "text": "{fake_assistant_reply(payload.text)}"}}]}}',
+    )
+    session.add(assistant_message)
+
+    run.status = "completed"
+    run.finished_at = datetime.utcnow()
+    run.summary = "chat completed"
+    run.updated_at = datetime.utcnow()
+    conversation.selected_leaf_message_id = assistant_message.id
+    conversation.updated_at = datetime.utcnow()
+
+    session.add(run)
+    session.add(conversation)
+    session.commit()
+    session.refresh(assistant_message)
+
+    return MessageCreateResult(
+        user_message_id=user_message.id,
+        assistant_message_id=assistant_message.id,
+        run_id=run.id,
+    )
+
+
+@app.post("/api/messages/{message_id}/regenerate", response_model=ConversationMessage)
+def regenerate_message(message_id: str, session: Session = Depends(get_session)) -> ConversationMessage:
+    target_message = session.get(ConversationMessage, message_id)
+    if not target_message:
+        raise HTTPException(status_code=404, detail="message not found")
+
+    if target_message.role != "user":
+        raise HTTPException(status_code=400, detail="regenerate target must be a user message")
+
+    assistant = ConversationMessage(
+        conversation_id=target_message.conversation_id,
+        parent_message_id=target_message.id,
+        role="assistant",
+        content_json='{"parts": [{"type": "text", "text": "regenerated assistant response"}]}',
+    )
+    session.add(assistant)
+
+    run = ConversationRun(
+        conversation_id=target_message.conversation_id,
+        message_id=assistant.id,
+        branch_leaf_message_id=assistant.id,
+        run_type="chat",
+        status="completed",
+        model_name=MODEL_NAME,
+        summary="regenerate completed",
+        started_at=datetime.utcnow(),
+        finished_at=datetime.utcnow(),
+    )
+    session.add(run)
+
+    conversation = session.get(Conversation, target_message.conversation_id)
+    if conversation:
+        conversation.selected_leaf_message_id = assistant.id
+        conversation.updated_at = datetime.utcnow()
+        session.add(conversation)
+
+    session.commit()
+    session.refresh(assistant)
+    return assistant
+
+
+@app.post("/api/messages/{message_id}/branch", response_model=ConversationMessage)
+def branch_from_message(
+    message_id: str,
+    payload: BranchCreate,
+    session: Session = Depends(get_session),
+) -> ConversationMessage:
+    target_message = session.get(ConversationMessage, message_id)
+    if not target_message:
+        raise HTTPException(status_code=404, detail="message not found")
+
+    branch_user = ConversationMessage(
+        conversation_id=target_message.conversation_id,
+        parent_message_id=target_message.id,
+        role="user",
+        content_json=f'{{"parts": [{{"type": "text", "text": "{payload.text}"}}]}}',
+    )
+    session.add(branch_user)
+
+    conversation = session.get(Conversation, target_message.conversation_id)
+    if conversation:
+        conversation.selected_leaf_message_id = branch_user.id
+        conversation.updated_at = datetime.utcnow()
+        session.add(conversation)
+
+    session.commit()
+    session.refresh(branch_user)
+    return branch_user
+
+
+@app.post("/api/files/upload-url")
+def create_upload_url(payload: UploadUrlCreate):
+    key = f"conversations/{uuid4()}-{payload.filename}"
+    return {"storage_backend": "local", "storage_key": key, "upload_method": "direct_register"}
+
+
+@app.post("/api/files/register", response_model=FileRecord)
+def register_file(payload: FileRegisterCreate, session: Session = Depends(get_session)) -> FileRecord:
+    conversation = session.get(Conversation, payload.conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    file_record = FileRecord(
+        conversation_id=payload.conversation_id,
+        filename=payload.filename,
+        storage_backend=payload.storage_backend,
+        storage_key=payload.storage_key,
+        mime_type=payload.mime_type,
+        size_bytes=payload.size_bytes,
+    )
+    session.add(file_record)
+    session.commit()
+    session.refresh(file_record)
+
+    binding = FileBinding(conversation_id=payload.conversation_id, file_id=file_record.id)
+    session.add(binding)
+    session.commit()
+
+    return file_record
+
+
+@app.get("/api/conversations/{conversation_id}/files", response_model=list[FileView])
+def list_conversation_files(conversation_id: str, session: Session = Depends(get_session)) -> list[FileView]:
+    files = session.exec(select(FileRecord).where(FileRecord.conversation_id == conversation_id)).all()
+    views: list[FileView] = []
+    for file_record in files:
+        binding = get_or_create_binding(session, conversation_id, file_record.id)
+        views.append(
+            FileView(
+                id=file_record.id,
+                conversation_id=file_record.conversation_id,
+                filename=file_record.filename,
+                storage_backend=file_record.storage_backend,
+                storage_key=file_record.storage_key,
+                mime_type=file_record.mime_type,
+                size_bytes=file_record.size_bytes,
+                included_in_context=binding.included_in_context,
+            )
+        )
+    return views
+
+
+@app.post("/api/conversations/{conversation_id}/files/{file_id}/include", response_model=FileBinding)
+def include_file(conversation_id: str, file_id: str, session: Session = Depends(get_session)) -> FileBinding:
+    binding = get_or_create_binding(session, conversation_id, file_id)
+    binding.included_in_context = True
+    binding.updated_at = datetime.utcnow()
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    return binding
+
+
+@app.post("/api/conversations/{conversation_id}/files/{file_id}/exclude", response_model=FileBinding)
+def exclude_file(conversation_id: str, file_id: str, session: Session = Depends(get_session)) -> FileBinding:
+    binding = get_or_create_binding(session, conversation_id, file_id)
+    binding.included_in_context = False
+    binding.updated_at = datetime.utcnow()
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    return binding
+
+
+@app.post("/api/conversations/{conversation_id}/files/{file_id}/summarize", response_model=FileSummary)
+def summarize_file(conversation_id: str, file_id: str, session: Session = Depends(get_session)) -> FileSummary:
+    file_record = session.get(FileRecord, file_id)
+    if not file_record:
+        raise HTTPException(status_code=404, detail="file not found")
+
+    run = ConversationRun(
+        conversation_id=conversation_id,
+        message_id=None,
+        branch_leaf_message_id=None,
+        run_type="summarize_file",
+        status="completed",
+        model_name=MODEL_NAME,
+        summary=f"summary generated for {file_record.filename}",
+        started_at=datetime.utcnow(),
+        finished_at=datetime.utcnow(),
+    )
+    session.add(run)
+
+    summary = FileSummary(
+        file_id=file_id,
+        conversation_id=conversation_id,
+        summary_type="short",
+        content=f"Summary for {file_record.filename}",
+    )
+    session.add(summary)
+    session.commit()
+    session.refresh(summary)
+    return summary
+
+
+@app.get("/api/conversations/{conversation_id}/right-panel", response_model=RightPanelResponse)
+def get_conversation_right_panel(conversation_id: str, session: Session = Depends(get_session)) -> RightPanelResponse:
+    runs = session.exec(
+        select(ConversationRun)
+        .where(ConversationRun.conversation_id == conversation_id)
+        .order_by(ConversationRun.created_at.desc())
+    ).all()
+    artifacts = session.exec(
+        select(ConversationArtifact)
+        .where(ConversationArtifact.conversation_id == conversation_id)
+        .order_by(ConversationArtifact.created_at.desc())
+    ).all()
+    files = list_conversation_files(conversation_id, session)
+
+    latest_file_summary = session.exec(
+        select(FileSummary)
+        .where(FileSummary.conversation_id == conversation_id)
+        .order_by(FileSummary.created_at.desc())
+    ).first()
+
+    return RightPanelResponse(
+        results={
+            "latest_runs": [
+                {
+                    "id": run.id,
+                    "run_type": run.run_type,
+                    "status": run.status,
+                    "summary": run.summary,
+                    "error_text": run.error_text,
+                }
+                for run in runs[:10]
+            ],
+            "latest_artifacts": [
+                {
+                    "id": artifact.id,
+                    "title": artifact.title,
+                    "artifact_type": artifact.artifact_type,
+                    "storage_key": artifact.storage_key,
+                }
+                for artifact in artifacts[:10]
+            ],
+        },
+        files=files,
+        summaries={
+            "conversation_summary": None,
+            "branch_summary": None,
+            "latest_file_summary": latest_file_summary.content if latest_file_summary else None,
+        },
+        agent={
+            "model": MODEL_NAME,
+            "store": False,
+        },
+    )
+
+
+@app.get("/api/conversations/{conversation_id}/runs", response_model=list[ConversationRun])
+def list_conversation_runs(conversation_id: str, session: Session = Depends(get_session)) -> list[ConversationRun]:
+    statement = select(ConversationRun).where(ConversationRun.conversation_id == conversation_id)
+    return session.exec(statement).all()
+
+
+@app.get("/api/conversations/{conversation_id}/artifacts", response_model=list[ConversationArtifact])
+def list_conversation_artifacts(
+    conversation_id: str,
+    session: Session = Depends(get_session),
+) -> list[ConversationArtifact]:
+    statement = select(ConversationArtifact).where(ConversationArtifact.conversation_id == conversation_id)
+    return session.exec(statement).all()
