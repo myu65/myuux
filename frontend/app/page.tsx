@@ -2,229 +2,271 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { createUrl } from "../lib/api";
+import { apiGet, apiPost, Conversation, ConversationDetail, FileItem, RightPanel } from "../lib/api";
 
-type Workspace = {
-  id: number;
-  name: string;
-};
-
-type Artifact = {
-  id: number;
-  path: string;
-  type: string;
-  published_at?: string | null;
-};
-
-type Run = {
-  id: number;
-  skill_name: string;
-  status: string;
-  prompt: string;
-};
+type RightPaneTab = "results" | "files" | "summaries" | "agent";
 
 const paneStyle = "border rounded-lg p-3 bg-white";
 
 export default function HomePage() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<number | null>(null);
-  const [workspaceName, setWorkspaceName] = useState("demo");
-  const [prompt, setPrompt] = useState("表紙を改善して");
-  const [logs, setLogs] = useState<string[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [rightPanel, setRightPanel] = useState<RightPanel | null>(null);
+  const [tab, setTab] = useState<RightPaneTab>("results");
+  const [newConversationTitle, setNewConversationTitle] = useState("MVP chat");
+  const [messageText, setMessageText] = useState("この仕様書を要約して");
+  const [fileName, setFileName] = useState("spec.md");
   const [loading, setLoading] = useState(false);
 
+  const selectedConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === selectedConversationId),
+    [conversations, selectedConversationId],
+  );
+
   useEffect(() => {
-    void loadWorkspaces();
+    void loadConversations();
   }, []);
 
   useEffect(() => {
-    if (!selectedWorkspaceId) {
+    if (!selectedConversationId) {
       return;
     }
-    void loadWorkspaceData(selectedWorkspaceId);
-  }, [selectedWorkspaceId]);
+    void loadConversationBundle(selectedConversationId);
+  }, [selectedConversationId]);
 
-  const selectedWorkspace = useMemo(
-    () => workspaces.find((workspace) => workspace.id === selectedWorkspaceId),
-    [selectedWorkspaceId, workspaces],
-  );
-
-  async function loadWorkspaces() {
+  async function loadConversations() {
     setLoading(true);
     try {
-      const response = await fetch(createUrl("/api/workspaces"));
-      if (!response.ok) {
-        throw new Error("workspace list fetch failed");
-      }
-      const body = (await response.json()) as Workspace[];
-      setWorkspaces(body);
-      if (!selectedWorkspaceId && body.length > 0) {
-        setSelectedWorkspaceId(body[0].id);
+      const list = await apiGet<Conversation[]>("/api/conversations");
+      setConversations(list);
+      if (!selectedConversationId && list.length > 0) {
+        setSelectedConversationId(list[0].id);
       }
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadWorkspaceData(workspaceId: number) {
-    const [artifactResponse, runResponse] = await Promise.all([
-      fetch(createUrl(`/api/workspaces/${workspaceId}/artifacts`)),
-      fetch(createUrl(`/api/workspaces/${workspaceId}/runs`)),
+  async function loadConversationBundle(conversationId: string) {
+    const [conversationDetail, panel] = await Promise.all([
+      apiGet<ConversationDetail>(`/api/conversations/${conversationId}`),
+      apiGet<RightPanel>(`/api/conversations/${conversationId}/right-panel`),
     ]);
-
-    if (artifactResponse.ok) {
-      setArtifacts((await artifactResponse.json()) as Artifact[]);
-    }
-    if (runResponse.ok) {
-      setRuns((await runResponse.json()) as Run[]);
-    }
+    setDetail(conversationDetail);
+    setRightPanel(panel);
   }
 
-  async function handleCreateWorkspace(event: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateConversation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!workspaceName.trim()) {
+    if (!newConversationTitle.trim()) {
       return;
     }
-
-    const response = await fetch(createUrl("/api/workspaces"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: workspaceName.trim() }),
+    const created = await apiPost<Conversation>("/api/conversations", {
+      title: newConversationTitle.trim(),
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const created = (await response.json()) as Workspace;
-    setWorkspaceName("");
-    setWorkspaces((prev) => [created, ...prev]);
-    setSelectedWorkspaceId(created.id);
+    setConversations((prev) => [created, ...prev]);
+    setSelectedConversationId(created.id);
+    setNewConversationTitle("");
   }
 
-  async function handleChatSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSendMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedWorkspaceId || !prompt.trim()) {
+    if (!selectedConversationId || !messageText.trim()) {
       return;
     }
-
-    setLogs(["run starting..."]);
-
-    const response = await fetch(createUrl(`/api/workspaces/${selectedWorkspaceId}/chat`), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: prompt.trim(), skill: "ppt_revise" }),
+    await apiPost(`/api/conversations/${selectedConversationId}/messages`, {
+      text: messageText.trim(),
+      parent_message_id: detail?.selected_leaf_message_id ?? undefined,
     });
-
-    if (!response.ok) {
-      setLogs(["failed to start run"]);
-      return;
-    }
-
-    const body = (await response.json()) as { run_id: number };
-    await streamRunEvents(body.run_id);
-    await loadWorkspaceData(selectedWorkspaceId);
+    await loadConversationBundle(selectedConversationId);
   }
 
-  async function streamRunEvents(runId: number) {
-    const response = await fetch(createUrl(`/api/runs/${runId}/events`));
-    if (!response.ok || !response.body) {
-      setLogs((prev) => [...prev, "failed to connect event stream"]);
+  async function handleRegenerate(messageId: string) {
+    await apiPost(`/api/messages/${messageId}/regenerate`);
+    if (selectedConversationId) {
+      await loadConversationBundle(selectedConversationId);
+    }
+  }
+
+  async function handleBranch(messageId: string) {
+    await apiPost(`/api/messages/${messageId}/branch`, {
+      text: "別案として考えて",
+    });
+    if (selectedConversationId) {
+      await loadConversationBundle(selectedConversationId);
+    }
+  }
+
+  async function handleRegisterFile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedConversationId || !fileName.trim()) {
       return;
     }
+    await apiPost("/api/files/register", {
+      conversation_id: selectedConversationId,
+      filename: fileName.trim(),
+      storage_backend: "local",
+      storage_key: `conversations/${selectedConversationId}/${fileName.trim()}`,
+      mime_type: "text/markdown",
+      size_bytes: 100,
+    });
+    await loadConversationBundle(selectedConversationId);
+  }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split("\n\n");
-      buffer = chunks.pop() ?? "";
-
-      for (const chunk of chunks) {
-        const dataLine = chunk.split("\n").find((line) => line.startsWith("data:"));
-        if (!dataLine) {
-          continue;
-        }
-        setLogs((prev) => [...prev, dataLine.replace("data:", "").trim()]);
-      }
+  async function includeFile(file: FileItem, include: boolean) {
+    if (!selectedConversationId) {
+      return;
     }
+    const action = include ? "include" : "exclude";
+    await apiPost(`/api/conversations/${selectedConversationId}/files/${file.id}/${action}`);
+    await loadConversationBundle(selectedConversationId);
+  }
+
+  async function summarizeFile(file: FileItem) {
+    if (!selectedConversationId) {
+      return;
+    }
+    await apiPost(`/api/conversations/${selectedConversationId}/files/${file.id}/summarize`);
+    await loadConversationBundle(selectedConversationId);
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 grid grid-cols-12 grid-rows-[1fr_220px] gap-3">
-      <section className={`${paneStyle} col-span-3 row-span-1 space-y-3`}>
-        <h2 className="font-bold">Workspace</h2>
-        <form onSubmit={handleCreateWorkspace} className="flex gap-2">
+    <main className="min-h-screen bg-slate-100 p-4 grid grid-cols-12 gap-3">
+      <section className={`${paneStyle} col-span-3 space-y-3`}>
+        <h2 className="font-bold">Conversations</h2>
+        <form onSubmit={handleCreateConversation} className="flex gap-2">
           <input
-            value={workspaceName}
-            onChange={(event) => setWorkspaceName(event.target.value)}
+            value={newConversationTitle}
+            onChange={(event) => setNewConversationTitle(event.target.value)}
             className="border rounded px-2 py-1 text-sm w-full"
-            placeholder="new workspace"
+            placeholder="new conversation"
           />
           <button className="bg-slate-800 text-white rounded px-3 py-1 text-sm" type="submit">
             Add
           </button>
         </form>
-
-        <div className="text-xs text-slate-500">{loading ? "Loading..." : `${workspaces.length} workspace(s)`}</div>
+        <div className="text-xs text-slate-500">{loading ? "Loading..." : `${conversations.length} conversation(s)`}</div>
         <ul className="space-y-2 text-sm">
-          {workspaces.map((workspace) => (
-            <li key={workspace.id}>
+          {conversations.map((conversation) => (
+            <li key={conversation.id}>
               <button
                 className={`w-full text-left rounded px-2 py-1 ${
-                  workspace.id === selectedWorkspaceId ? "bg-slate-200" : "hover:bg-slate-50"
+                  conversation.id === selectedConversationId ? "bg-slate-200" : "hover:bg-slate-50"
                 }`}
-                onClick={() => setSelectedWorkspaceId(workspace.id)}
+                onClick={() => setSelectedConversationId(conversation.id)}
               >
-                #{workspace.id} {workspace.name}
+                {conversation.title}
               </button>
             </li>
           ))}
         </ul>
       </section>
 
-      <section className={`${paneStyle} col-span-6 row-span-1`}>
-        <h2 className="font-bold mb-2">Artifact Preview</h2>
-        <p className="text-sm mb-3">{selectedWorkspace ? `${selectedWorkspace.name} の成果物` : "ワークスペースを選択"}</p>
-        <ul className="space-y-2 text-sm">
-          {artifacts.length === 0 ? <li className="text-slate-500">成果物はまだありません</li> : null}
-          {artifacts.map((artifact) => (
-            <li key={artifact.id} className="border rounded px-2 py-1">
-              <div>{artifact.path}</div>
-              <div className="text-xs text-slate-500">
-                type: {artifact.type} / {artifact.published_at ? "published" : "draft"}
-              </div>
+      <section className={`${paneStyle} col-span-6 space-y-3`}>
+        <h2 className="font-bold">Chat</h2>
+        <p className="text-sm text-slate-600">{selectedConversation ? selectedConversation.title : "会話を選択"}</p>
+        <ul className="space-y-2 text-sm max-h-[70vh] overflow-y-auto">
+          {detail?.selected_path_messages.map((message) => (
+            <li key={message.id} className="border rounded p-2 bg-slate-50">
+              <div className="font-semibold text-xs uppercase text-slate-500">{message.role}</div>
+              <div>{message.text}</div>
+              {message.role === "user" ? (
+                <button
+                  className="text-xs text-blue-700 mt-2 mr-2"
+                  onClick={() => handleRegenerate(message.id)}
+                  type="button"
+                >
+                  regenerate
+                </button>
+              ) : null}
+              <button className="text-xs text-purple-700 mt-2" onClick={() => handleBranch(message.id)} type="button">
+                branch from here
+              </button>
             </li>
           ))}
         </ul>
-      </section>
-
-      <section className={`${paneStyle} col-span-3 row-span-1`}>
-        <h2 className="font-bold mb-2">AI Chat</h2>
-        <form onSubmit={handleChatSubmit} className="space-y-2">
+        <form onSubmit={handleSendMessage} className="space-y-2">
           <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
+            value={messageText}
+            onChange={(event) => setMessageText(event.target.value)}
             className="border rounded px-2 py-1 text-sm w-full h-28"
           />
           <button className="bg-blue-700 text-white rounded px-3 py-1 text-sm w-full" type="submit">
-            Run via Chat
+            Send
           </button>
         </form>
-        <p className="text-xs text-slate-500 mt-3">runs: {runs.length}</p>
       </section>
 
-      <section className={`${paneStyle} col-span-12 row-span-1`}>
-        <h2 className="font-bold mb-2">Run Console</h2>
-        <pre className="text-xs bg-slate-950 text-green-200 rounded p-3 h-40 overflow-y-auto">{logs.join("\n")}</pre>
+      <section className={`${paneStyle} col-span-3 space-y-3`}>
+        <h2 className="font-bold">Workbench</h2>
+        <div className="flex gap-1 text-xs">
+          {(["results", "files", "summaries", "agent"] as RightPaneTab[]).map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setTab(name)}
+              className={`rounded px-2 py-1 ${tab === name ? "bg-slate-800 text-white" : "bg-slate-200"}`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+
+        {tab === "results" ? (
+          <div className="text-sm space-y-2">
+            {(rightPanel?.results.latest_runs ?? []).map((run) => (
+              <div key={run.id} className="border rounded p-2">
+                <div>{run.run_type}</div>
+                <div className="text-xs text-slate-500">status: {run.status}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {tab === "files" ? (
+          <div className="space-y-2">
+            <form onSubmit={handleRegisterFile} className="flex gap-2">
+              <input
+                value={fileName}
+                onChange={(event) => setFileName(event.target.value)}
+                className="border rounded px-2 py-1 text-sm w-full"
+              />
+              <button className="bg-slate-700 text-white rounded px-2 py-1 text-xs" type="submit">
+                register
+              </button>
+            </form>
+            <ul className="space-y-2 text-xs">
+              {(rightPanel?.files ?? []).map((file) => (
+                <li key={file.id} className="border rounded p-2">
+                  <div>{file.filename}</div>
+                  <div className="text-slate-500">{file.included_in_context ? "included" : "excluded"}</div>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      className="text-blue-700"
+                      onClick={() => includeFile(file, !file.included_in_context)}
+                      type="button"
+                    >
+                      {file.included_in_context ? "exclude" : "include"}
+                    </button>
+                    <button className="text-purple-700" onClick={() => summarizeFile(file)} type="button">
+                      summarize
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {tab === "summaries" ? <pre className="text-xs">{rightPanel?.summaries.latest_file_summary ?? "no summary"}</pre> : null}
+
+        {tab === "agent" ? (
+          <div className="text-sm">
+            <div>model: {rightPanel?.agent.model ?? "-"}</div>
+            <div>store: {String(rightPanel?.agent.store ?? false)}</div>
+          </div>
+        ) : null}
       </section>
     </main>
   );
