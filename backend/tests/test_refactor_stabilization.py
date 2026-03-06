@@ -50,10 +50,10 @@ def test_openai_runner_cleanup_warning_lifecycle() -> None:
     result = runner.chat(
         prompt="hello",
         files=[
-            {"filename": "ok.txt", "content": b"ok", "content_type": "text/plain"},
-            {"filename": "fail.txt", "content": b"bad", "content_type": "text/plain"},
+            {"filename": "ok.png", "content": b"ok", "content_type": "image/png"},
+            {"filename": "fail.png", "content": b"bad", "content_type": "image/png"},
         ],
     )
     assert result.text == "ok"
     assert any("cleanup failed" in warning for warning in result.warnings)
-    assert client.deleted == ["file-ok.txt", "file-fail.txt"]
+    assert client.deleted == ["file-ok.png", "file-fail.png"]

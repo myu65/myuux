@@ -6,6 +6,7 @@ from app.models import Conversation, ConversationMessage, ConversationRun, FileB
 from app.schemas import MessageCreateResult, MessagePathView
 from app.services.content_service import message_text, serialize_message_text
 from app.services.openai_runner import OpenAIRunner
+from app.services.storage import StorageManager
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
@@ -42,13 +43,15 @@ def list_included_files(session: Session, conversation_id: str) -> list[dict]:
         )
     ).all()
     files: list[dict] = []
+    storage = StorageManager()
     for binding in bindings:
         file_record = session.get(FileRecord, binding.file_id)
         if file_record and file_record.conversation_id == conversation_id:
+            content = storage.read_bytes(backend_name=file_record.storage_backend, key=file_record.storage_key)
             files.append(
                 {
                     "filename": file_record.filename,
-                    "content": f"placeholder content for {file_record.filename}".encode(),
+                    "content": content,
                     "content_type": file_record.mime_type,
                 }
             )

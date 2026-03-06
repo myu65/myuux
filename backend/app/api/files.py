@@ -1,9 +1,18 @@
+import json
 from datetime import datetime
 from uuid import uuid4
 
 from app.db import get_session
-from app.models import Conversation, ConversationRun, FileRecord, FileSummary
-from app.schemas import FileRegisterCreate, FileView, RightPanelResponse, UploadUrlCreate
+from app.models import Conversation, ConversationArtifact, ConversationRun, FileRecord, FileSummary
+from app.schemas import (
+    ArtifactResultView,
+    FileRegisterCreate,
+    FileView,
+    RightPanelResponse,
+    RightPanelResults,
+    RunResultView,
+    UploadUrlCreate,
+)
 from app.services.file_service import get_or_create_binding
 from app.services.file_service import summarize_file as summarize_file_service
 from app.services.openai_runner import OpenAIRunner
@@ -79,11 +88,32 @@ def summarize_file(conversation_id: str, file_id: str, session: Session = Depend
     return summarize_file_service(session, conversation_id, file_id, OpenAIRunner())
 
 
+def _parse_warnings(warnings_json: str) -> list[str]:
+    try:
+        parsed = json.loads(warnings_json)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _parse_metadata(metadata_json: str) -> dict:
+    try:
+        parsed = json.loads(metadata_json)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def get_conversation_right_panel(conversation_id: str, session: Session = Depends(get_session)) -> RightPanelResponse:
     runs = session.exec(
         select(ConversationRun)
         .where(ConversationRun.conversation_id == conversation_id)
         .order_by(ConversationRun.created_at.desc())
+    ).all()
+    artifacts = session.exec(
+        select(ConversationArtifact)
+        .where(ConversationArtifact.conversation_id == conversation_id)
+        .order_by(ConversationArtifact.created_at.desc())
     ).all()
     files = list_conversation_files(conversation_id, session)
     latest_file_summary = session.exec(
@@ -92,19 +122,30 @@ def get_conversation_right_panel(conversation_id: str, session: Session = Depend
         .order_by(FileSummary.created_at.desc())
     ).first()
     return RightPanelResponse(
-        results={
-            "latest_runs": [
-                {
-                    "id": run.id,
-                    "run_type": run.run_type,
-                    "status": run.status,
-                    "summary": run.summary,
-                    "error_text": run.error_text,
-                }
+        results=RightPanelResults(
+            latest_runs=[
+                RunResultView(
+                    id=run.id,
+                    run_type=run.run_type,
+                    status=run.status,
+                    summary=run.summary,
+                    error_text=run.error_text,
+                    warnings=_parse_warnings(run.warnings_json),
+                )
                 for run in runs[:10]
             ],
-            "latest_artifacts": [],
-        },
+            latest_artifacts=[
+                ArtifactResultView(
+                    id=artifact.id,
+                    title=artifact.title,
+                    artifact_type=artifact.artifact_type,
+                    storage_key=artifact.storage_key,
+                    storage_backend=artifact.storage_backend,
+                    metadata=_parse_metadata(artifact.metadata_json),
+                )
+                for artifact in artifacts[:10]
+            ],
+        ),
         files=files,
         summaries={
             "conversation_summary": None,

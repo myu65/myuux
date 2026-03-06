@@ -37,8 +37,22 @@ export type FileItem = {
 
 export type RightPanel = {
   results: {
-    latest_runs: Array<{ id: string; run_type: string; status: string; summary?: string | null; error_text?: string | null }>;
-    latest_artifacts: Array<{ id: string; title: string; artifact_type: string; storage_key: string }>;
+    latest_runs: Array<{
+      id: string;
+      run_type: string;
+      status: string;
+      summary?: string | null;
+      error_text?: string | null;
+      warnings: string[];
+    }>;
+    latest_artifacts: Array<{
+      id: string;
+      title: string;
+      artifact_type: string;
+      storage_key: string;
+      storage_backend: string;
+      metadata: Record<string, unknown>;
+    }>;
   };
   files: FileItem[];
   summaries: {

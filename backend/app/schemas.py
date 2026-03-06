@@ -111,8 +111,32 @@ class FileView(BaseModel):
     included_in_context: bool = False
 
 
+
+
+class RunResultView(BaseModel):
+    id: str
+    run_type: str
+    status: str
+    summary: Optional[str] = None
+    error_text: Optional[str] = None
+    warnings: list[str] = PydanticField(default_factory=list)
+
+
+class ArtifactResultView(BaseModel):
+    id: str
+    title: str
+    artifact_type: str
+    storage_key: str
+    storage_backend: str
+    metadata: dict[str, Any] = PydanticField(default_factory=dict)
+
+
+class RightPanelResults(BaseModel):
+    latest_runs: list[RunResultView]
+    latest_artifacts: list[ArtifactResultView]
+
 class RightPanelResponse(BaseModel):
-    results: dict[str, Any]
+    results: RightPanelResults
     files: list[FileView]
     summaries: dict[str, Optional[str]]
     agent: dict[str, Any]

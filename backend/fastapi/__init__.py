@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Callable
 
 
@@ -13,10 +14,18 @@ class UploadFile:
         self.filename = filename
 
 
+@dataclass
+class _Route:
+    method: str
+    path: str
+    handler: Callable[..., Any]
+
+
 class FastAPI:
     def __init__(self, title: str, version: str):
         self.title = title
         self.version = version
+        self.routes: list[_Route] = []
 
     def add_middleware(self, _middleware: type, **_kwargs: Any) -> None:
         return None
@@ -27,21 +36,28 @@ class FastAPI:
 
         return decorator
 
-    def get(self, _path: str, **_kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def get(self, path: str, **_kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            self.routes.append(_Route(method="GET", path=path, handler=func))
             return func
 
         return decorator
 
-    def post(self, _path: str, **_kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def post(self, path: str, **_kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            self.routes.append(_Route(method="POST", path=path, handler=func))
             return func
 
         return decorator
 
 
-def Depends(dependency: Callable[..., Any]) -> Callable[..., Any]:
-    return dependency
+class _Dependency:
+    def __init__(self, dependency: Callable[..., Any]):
+        self.dependency = dependency
+
+
+def Depends(dependency: Callable[..., Any]) -> _Dependency:
+    return _Dependency(dependency)
 
 
 def File(_default: Any) -> Any:
