@@ -6,6 +6,7 @@ from app.models import Conversation, ConversationMessage, ConversationRun, FileB
 from app.schemas import MessageCreateResult, MessagePathView
 from app.services.content_service import message_text, serialize_message_text
 from app.services.openai_runner import OpenAIRunner
+from app.services.storage import StorageManager
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
@@ -42,17 +43,29 @@ def list_included_files(session: Session, conversation_id: str) -> list[dict]:
         )
     ).all()
     files: list[dict] = []
+    storage = StorageManager()
     for binding in bindings:
         file_record = session.get(FileRecord, binding.file_id)
         if file_record and file_record.conversation_id == conversation_id:
+            content = storage.read_bytes(backend_name=file_record.storage_backend, key=file_record.storage_key)
             files.append(
                 {
                     "filename": file_record.filename,
-                    "content": f"placeholder content for {file_record.filename}".encode(),
+                    "content": content,
                     "content_type": file_record.mime_type,
                 }
             )
     return files
+
+
+def _mark_run_failed(session: Session, run: ConversationRun, exc: Exception, warnings: list[str] | None = None) -> None:
+    run.status = "failed"
+    run.error_text = str(exc)
+    run.finished_at = datetime.utcnow()
+    run.warnings_json = json.dumps(warnings or [])
+    run.updated_at = datetime.utcnow()
+    session.add(run)
+    session.commit()
 
 
 def create_message_with_assistant(
@@ -84,16 +97,25 @@ def create_message_with_assistant(
     session.add(run)
     session.commit()
 
-    result = runner.chat(prompt=text, files=list_included_files(session, conversation_id))
-    assistant_message = ConversationMessage(
-        conversation_id=conversation_id,
-        parent_message_id=user_message.id,
-        role="assistant",
-        content_json=serialize_message_text(result.text),
-    )
-    session.add(assistant_message)
-    session.commit()
-    session.refresh(assistant_message)
+    try:
+        result = runner.chat(prompt=text, files=list_included_files(session, conversation_id))
+    except Exception as exc:  # noqa: BLE001
+        _mark_run_failed(session, run, exc)
+        raise HTTPException(status_code=502, detail="model run failed") from exc
+
+    try:
+        assistant_message = ConversationMessage(
+            conversation_id=conversation_id,
+            parent_message_id=user_message.id,
+            role="assistant",
+            content_json=serialize_message_text(result.text),
+        )
+        session.add(assistant_message)
+        session.commit()
+        session.refresh(assistant_message)
+    except Exception as exc:  # noqa: BLE001
+        _mark_run_failed(session, run, exc, result.warnings)
+        raise
 
     run.status = "completed"
     run.finished_at = datetime.utcnow()
@@ -119,7 +141,10 @@ def regenerate_message(session: Session, message_id: str, runner: OpenAIRunner) 
     if target_message.role != "user":
         raise HTTPException(status_code=400, detail="regenerate target must be a user message")
 
-    result = runner.chat(prompt=message_text(target_message.content_json), files=[])
+    result = runner.chat(
+        prompt=message_text(target_message.content_json),
+        files=list_included_files(session, target_message.conversation_id),
+    )
     assistant = ConversationMessage(
         conversation_id=target_message.conversation_id,
         parent_message_id=target_message.id,

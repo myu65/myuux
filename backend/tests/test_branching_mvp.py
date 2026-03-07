@@ -9,6 +9,7 @@ from sqlmodel import Session, SQLModel
 
 def load_main(tmp_path: Path) -> ModuleType:
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp_path / 'branching.db'}"
+    os.environ["STORAGE_LOCAL_ROOT"] = str(tmp_path / "storage")
     project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -100,10 +101,14 @@ def test_files_include_and_summary_visible_in_right_panel(tmp_path: Path) -> Non
         included = main.include_file(conversation.id, registered.id, session)
         assert included.included_in_context is True
 
+        storage_file = Path(os.environ["STORAGE_LOCAL_ROOT"]) / "conversations/spec.md"
+        storage_file.parent.mkdir(parents=True, exist_ok=True)
+        storage_file.write_bytes(b"# spec")
+
         summary = main.summarize_file(conversation.id, registered.id, session)
         assert summary.summary_type == "short"
 
         right = main.get_conversation_right_panel(conversation.id, session)
         assert len(right.files) == 1
         assert right.agent["store"] is False
-        assert len(right.results["latest_runs"]) >= 1
+        assert len(right.results.latest_runs) >= 1

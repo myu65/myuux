@@ -3,6 +3,7 @@ from datetime import datetime
 
 from app.models import Conversation, ConversationRun, FileBinding, FileRecord, FileSummary
 from app.services.openai_runner import OpenAIRunner
+from app.services.storage import StorageManager
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
@@ -35,9 +36,10 @@ def summarize_file(session: Session, conversation_id: str, file_id: str, runner:
     if not binding.included_in_context:
         raise HTTPException(status_code=400, detail="file must be included before summarize")
 
+    storage = StorageManager()
     file_payload = {
         "filename": file_record.filename,
-        "content": f"placeholder content for {file_record.filename}".encode(),
+        "content": storage.read_bytes(backend_name=file_record.storage_backend, key=file_record.storage_key),
         "content_type": file_record.mime_type,
     }
     result = runner.chat(prompt=f"Summarize file: {file_record.filename}", files=[file_payload])

@@ -14,6 +14,7 @@ from sqlmodel import Session, SQLModel, select
 
 def load_main(tmp_path: Path):
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp_path / 'file_service.db'}"
+    os.environ["STORAGE_LOCAL_ROOT"] = str(tmp_path / "storage")
     project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -76,6 +77,10 @@ def test_summarize_file_persists_runner_warnings(tmp_path: Path) -> None:
             session,
         )
         main.include_file(conversation.id, file_record.id, session)
+
+        storage_file = Path(os.environ["STORAGE_LOCAL_ROOT"]) / "conversations/spec.md"
+        storage_file.parent.mkdir(parents=True, exist_ok=True)
+        storage_file.write_bytes(b"# spec")
 
         summary = summarize_file(session, conversation.id, file_record.id, runner)
         runs = session.exec(
