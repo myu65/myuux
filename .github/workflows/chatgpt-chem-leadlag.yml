@@ -1,0 +1,46 @@
+name: ChatGPT Temporary Chemical Lead-Lag Run
+
+on:
+  push:
+    branches:
+      - codex/cicodex
+    paths:
+      - ".github/workflows/chatgpt-chem-leadlag.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  run-analysis:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Reconstruct runner
+        shell: bash
+        run: |
+          cat chatgpt_tmp_chem/p*.b64 | tr -d '\n' | base64 -d > /tmp/chem_leadlag_full.py
+          echo "e918c0dd257a0cf851d12c9864723d7e5fd6762d06e08b96e43f3211b45e7faf  /tmp/chem_leadlag_full.py" | sha256sum -c -
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check numpy pandas requests
+
+      - name: Run analysis
+        run: python /tmp/chem_leadlag_full.py
+
+      - name: Commit compact results
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add chatgpt_chem_results/out
+          git commit -m "chatgpt: temporary chemical lead-lag results [skip ci]"
+          git push
