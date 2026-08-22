@@ -1,28 +1,35 @@
 from __future__ import annotations
 
-import base64
-import subprocess
-import sys
-from pathlib import Path
+import urllib.request
 
 
 def main() -> int:
-    repo_root = Path(__file__).resolve().parents[2]
-    parts = sorted((repo_root / "chatgpt_tmp_chem").glob("p*.b64"))
-    if len(parts) != 6:
-        raise RuntimeError(f"expected 6 runner parts, got {len(parts)}")
-    payload = "".join(p.read_text(encoding="utf-8").strip() for p in parts)
-    runner = Path("/tmp/chem_leadlag_full.py")
-    runner.write_bytes(base64.b64decode(payload))
-    subprocess.check_call([
-        "uv", "pip", "install", "--python", sys.executable,
-        "numpy", "pandas", "requests",
-    ])
-    subprocess.check_call([sys.executable, str(runner)], cwd=repo_root)
-    bundle = repo_root / "chatgpt_chem_results" / "out" / "analysis_bundle.json"
-    print("===CHATGPT_ANALYSIS_BUNDLE_BEGIN===")
-    print(bundle.read_text(encoding="utf-8"))
-    print("===CHATGPT_ANALYSIS_BUNDLE_END===")
+    urls = [
+        "https://static.stooq.com/db/h/d_us_txt.zip",
+        "https://static.stooq.com/db/h/d_jp_txt.zip",
+        "https://static.stooq.com/db/h/d_world_txt.zip",
+    ]
+    for url in urls:
+        req = urllib.request.Request(
+            url,
+            headers={"Range": "bytes=0-1023", "User-Agent": "Mozilla/5.0"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                chunk = resp.read(1024)
+                print(
+                    "STOOQ_TEST",
+                    url,
+                    resp.status,
+                    resp.headers.get("Content-Length"),
+                    resp.headers.get("Content-Type"),
+                    resp.headers.get("Content-Range"),
+                    len(chunk),
+                    chunk[:16].hex(),
+                    flush=True,
+                )
+        except Exception as exc:
+            print("STOOQ_TEST_ERROR", url, repr(exc), flush=True)
     return 0
 
 
